@@ -152,6 +152,45 @@ def detect_deep_intervals(df: pd.DataFrame, depth_threshold: int, gap_threshold_
 
     return intervals
 
+def get_cast_info(cast_df: pd.DataFrame, depth_threshold: int) -> list[dict]:
+    """
+    Extracts information about each cast, including start/end and deep section timing.
+
+    Parameters:
+        cast_df (pd.DataFrame): CTD data containing 'timestamp' and 'depth'.
+        mount_df (pd.DataFrame): Mount data (currently unused, but included for future expansion).
+        depth_threshold (int): Minimum depth to define the 'deep' section of a cast.
+
+    Returns:
+        list[dict]: A list where each entry represents a cast and its deep interval:
+            {
+                'cast_id': str,
+                'start': pd.Timestamp,
+                'end': pd.Timestamp,
+                'deep_start': pd.Timestamp,
+                'deep_end': pd.Timestamp
+            }
+    """
+
+    casts = []
+
+    # isolate cast time intervals, and deep section of each cast  -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    cast_ints = detect_cast_intervals(df=cast_df, gap_threshold_minutes=10) 
+    deep_ints = detect_deep_intervals(df=cast_df, depth_threshold=20, gap_threshold_seconds=60)
+
+    for i, cast in enumerate(cast_ints):
+        deep = deep_ints[i]
+        cast_info = {
+            "cast_id": f"cast_{i}",
+            "start": cast[0],
+            "end": cast[1],
+            "deep_start": deep[0],
+            "deep_end": deep[1]
+        }
+        casts.append(cast_info)
+
+    return casts
+
 def plot_cast_depth_vs_temp(start: pd.Timestamp, end: pd.Timestamp, locationCode: str, df: pd.DataFrame, depth_threshold: int) -> None:
     """
     Plots CTD cast: Temperature vs Depth, ignoring time axis.
@@ -195,6 +234,25 @@ def plot_cast_depth_vs_temp(start: pd.Timestamp, end: pd.Timestamp, locationCode
     plt.tight_layout()
     plt.show()
 
+def round_data_tick_size(value):
+    """
+    Round a numeric step size to a 'clean' number: 1, 2, 5, or 10 × 10^n
+    """
+    import math
+    magnitude = 10 ** math.floor(math.log10(value))
+    residual = value / magnitude
+
+    if residual < 1.5:
+        nice = 1
+    elif residual < 3:
+        nice = 2
+    elif residual < 7:
+        nice = 5
+    else:
+        nice = 10
+
+    return nice * magnitude
+
 def plot_mount_temp_vs_time(start: pd.Timestamp, end: pd.Timestamp, locationCode: str, df: pd.DataFrame) -> None:
     """
     Plots a temperature time-series with fewer time labels.
@@ -221,69 +279,88 @@ def plot_mount_temp_vs_time(start: pd.Timestamp, end: pd.Timestamp, locationCode
     ax.legend()
     plt.tight_layout()
     plt.show()
-
-
-def cast_and_mount_temp_plot(start: pd.Timestamp, end: pd.Timestamp, cast_df: pd.DataFrame, mount_df: pd.DataFrame, mount_depth_m: int, locationCode: str) -> None:
+def cast_and_mount_temp_plot(
+    cast_df: pd.DataFrame,
+    mount_df: pd.DataFrame,
+    mount_depth_m: int,
+    locationCode: str,
+    title: str
+) -> None:
     """
     Plots cast and mount temperature as color gradients vs. time and depth.
 
     Cast data is plotted at measured depths.
-    Mount data is plotted at fixed mount_depth_m, colored by temperature.
+    Mount data is plotted at fixed depth (mount_depth_m), colored by temperature.
 
     Parameters:
-        start, end: Interval bounds
-        cast_df: DataFrame with 'timestamp', 'temperature', 'depth'
-        mount_df: DataFrame with 'timestamp', 'temperature'
-        cast_label: Label for cast source
-        mount_label: Label for mount source
-        mount_depth_m: Depth to fix for mount sensor (e.g. 23 m)
+        cast_df (pd.DataFrame): DataFrame with 'timestamp', 'temperature', 'depth'
+        mount_df (pd.DataFrame): DataFrame with 'timestamp', 'temperature'
+        mount_depth_m (int): Depth of fixed mount sensor
+        locationCode (str): ONC location code
+        title (str): Plot title
     """
+    cast_info = get_cast_info(cast_df=cast_df, depth_threshold=mount_depth_m)
 
-    # Slice data
-    cast = cast_df[(cast_df["timestamp"] >= start) & (cast_df["timestamp"] <= end)]
-    mount = mount_df[(mount_df["timestamp"] >= start) & (mount_df["timestamp"] <= end)]
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(14, 10), sharex=False)
+    axes = axes.flatten()
 
-    # Start plot
-    fig, ax = plt.subplots(figsize=(10, 6))
+    for i, cur in enumerate(cast_info[:2]):  # limit to 2 casts (2x2 grid)
+        cast = cast_df[(cast_df["timestamp"] >= cur["start"]) & (cast_df["timestamp"] <= cur["end"])]
+        mount = mount_df[(mount_df["timestamp"] >= cur["start"]) & (mount_df["timestamp"] <= cur["end"])]
 
-    vmin = min(cast["temperature"].min(), mount["temperature"].min())
-    vmax = max(cast["temperature"].max(), mount["temperature"].max())
+        cast_deep = cast_df[(cast_df["timestamp"] >= cur["deep_start"]) & (cast_df["timestamp"] <= cur["deep_end"])]
+        mount_deep = mount_df[(mount_df["timestamp"] >= cur["deep_start"]) & (mount_df["timestamp"] <= cur["deep_end"])]
 
-    sc_cast = ax.scatter(
-    cast["timestamp"], cast["depth"],
-    c=cast["temperature"],
-    cmap="viridis",
-    s=25,
-    edgecolor="none",
-    label="Cast",
-    vmin=vmin, vmax=vmax
-    )
+        for j, (c, m, label) in enumerate([(cast, mount, "Entire"), (cast_deep, mount_deep, "Deep")]):
+            ax = axes[i * 2 + j]
+            if c.empty or m.empty:
+                ax.set_title(f"No data | {label} Cast {i}")
+                continue
 
-    sc_mount = ax.scatter(
-    mount["timestamp"], [mount_depth_m] * len(mount),
-    c=mount["temperature"],
-    cmap="viridis",
-    s=25,
-    edgecolor="none",
-    marker="s",
-    label="Mount",
-    vmin=vmin, vmax=vmax
-    )
+            vmin = min(c["temperature"].min(), m["temperature"].min())
+            vmax = max(c["temperature"].max(), m["temperature"].max())
 
+            sc_cast = ax.scatter(
+                c["timestamp"], c["depth"],
+                c=c["temperature"],
+                cmap="viridis",
+                s=20,
+                edgecolor="none",
+                label="Cast",
+                vmin=vmin, vmax=vmax
+            )
 
-    # Axis formatting
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Depth (m)")
-    ax.invert_yaxis()
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            sc_mount = ax.scatter(
+                m["timestamp"], [mount_depth_m] * len(m),
+                c=m["temperature"],
+                cmap="viridis",
+                s=20,
+                edgecolor="none",
+                marker="s",
+                label="Mount",
+                vmin=vmin, vmax=vmax
+            )
 
-    # Title and legend
-    title_str = f"{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%B %d, %Y')}"
-    ax.set_title(f"Cast vs Mount at {places[locationCode]}\n{title_str}", fontweight="bold")
-    cbar = plt.colorbar(sc_cast, ax=ax)
-    cbar.set_label("Temperature (°C)")
+            ax.set_xlabel("Time (UTC)", labelpad=10)
+            ax.set_ylabel("Depth (m)", labelpad=10)
+            ax.invert_yaxis()
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            ax.set_title(f"{label} | Cast {i+1}", pad=10)
+            ax.legend()
+            ax.grid(True)
 
-    ax.legend()
-    ax.grid(True)
-    plt.tight_layout()
+            # Format time axis with ~5 clean ticks
+            duration = (c["timestamp"].max() - c["timestamp"].min()).total_seconds()
+            target_step = duration / 5
+            nice_step = round_data_tick_size(target_step)
+            ax.xaxis.set_major_locator(mdates.SecondLocator(interval=nice_step))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+
+            cbar = plt.colorbar(sc_cast, ax=ax)
+            cbar.set_label("Temperature (°C)", labelpad=10)
+
+    # Adjust layout to make space for subtitle
+    plt.subplots_adjust(top=0.92, hspace=0.4)
+    fig.suptitle(f"{places[locationCode]} - {title}", fontsize=14, fontweight="bold")
+    #fig.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
