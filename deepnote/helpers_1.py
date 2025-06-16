@@ -9,13 +9,15 @@ import numpy as np
 
 from functools import reduce
 
-#token = os.environ["TRICY_TOKEN"]
+# token = os.environ["GRACE_TOKEN"]
 from dotenv import load_dotenv
 load_dotenv()
 token = os.getenv("ONC_TOKEN")
 
 # Create ONC client
 my_onc = onc.ONC(token)
+
+places = {"FGPPN": "Folger Pinnacle", "FGPD": "Folger Deep", "CF341": "Cast at Folger Pinnacle", "CF340": "Cast at Folger Deep"}
 
 
 def get_property(start: str, end: str, locationCode: str, deviceCategoryCode: str, sensorCategoryCode: str) -> pd.DataFrame:
@@ -184,7 +186,7 @@ def plot_cast_depth_vs_temp(start: pd.Timestamp, end: pd.Timestamp, locationCode
     #ax.invert_xaxis()
     ax.invert_yaxis()
     ax.set_title(
-        f"Temperature Profile at {locationCode}\n"
+        f"{places[locationCode]}\n"
         f"{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%b %d, %Y')}",
         fontweight="bold"
     )
@@ -212,7 +214,7 @@ def plot_mount_temp_vs_time(start: pd.Timestamp, end: pd.Timestamp, locationCode
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
     plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
 
-    title_str = f"CTD Mount at {locationCode}:\n{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%B %d, %Y')}"
+    title_str = f"{places[locationCode]}\n{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%B %d, %Y')}"
     ax.set_title(title_str, fontweight="bold")
 
     ax.grid(True, linestyle="--", alpha=0.5)
@@ -221,10 +223,7 @@ def plot_mount_temp_vs_time(start: pd.Timestamp, end: pd.Timestamp, locationCode
     plt.show()
 
 
-
-
-
-def cast_and_mount_temp_plot(start: pd.Timestamp, end: pd.Timestamp, cast_df: pd.DataFrame, mount_df: pd.DataFrame, mount_depth_m: int) -> None:
+def cast_and_mount_temp_plot(start: pd.Timestamp, end: pd.Timestamp, cast_df: pd.DataFrame, mount_df: pd.DataFrame, mount_depth_m: int, locationCode: str) -> None:
     """
     Plots cast and mount temperature as color gradients vs. time and depth.
 
@@ -280,7 +279,7 @@ def cast_and_mount_temp_plot(start: pd.Timestamp, end: pd.Timestamp, cast_df: pd
 
     # Title and legend
     title_str = f"{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%B %d, %Y')}"
-    ax.set_title(f"Temperature Profile: Cast and Mount\n{title_str}", fontweight="bold")
+    ax.set_title(f"Cast vs Mount at {places[locationCode]}\n{title_str}", fontweight="bold")
     cbar = plt.colorbar(sc_cast, ax=ax)
     cbar.set_label("Temperature (°C)")
 
