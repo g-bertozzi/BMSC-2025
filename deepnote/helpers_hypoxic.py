@@ -136,7 +136,7 @@ def get_property(start: str, end: str, locationCode: str, deviceCategoryCode: st
         "dateTo" : end,
         "metadata": "minimum",
         "qualityControl": "clean",
-        "resamplePeriod": 1800,
+        "resamplePeriod": 900,
         "resampleType": "avg"
         }
     
@@ -293,22 +293,23 @@ def plot_all_normalization(df: pd.DataFrame, title: str = "Sensor Readings Over 
     normalized_df = smooth_df(renamed_df) # rollowing window mean filter for outliers
 
     dfs = [renamed_df, normalized_df]
+    scaled_dfs = [renamed_df, normalized_df]
 
     # Set 'timestamp' as index (no longer a column)
     renamed_df = renamed_df.set_index("timestamp")
     normalized_df = normalized_df.set_index("timestamp")
 
     # Define figure and axes for subplots
-    fig, ax = plt.subplots(figsize=(14, 20), nrows=2, ncols=1)
+    fig, ax = plt.subplots(figsize=(16, 26), nrows=4, ncols=1)
 
     # Get sensor columns
     sensor_cols = renamed_df.columns.tolist()
     
-    # TODO: make modular for df and df scaled
+    # TODO: unhard code this
 
     ####
     for i, df in enumerate(dfs):
-        print()
+
         for col in sensor_cols:
             # NOTE: plot with priority 
             base = col.lower().split(" (")[0] # Get base property name (remove units in parentheses)
@@ -322,15 +323,11 @@ def plot_all_normalization(df: pd.DataFrame, title: str = "Sensor Readings Over 
         # Labels and title
         ax[i].set_xlabel("Time", labelpad=12)
         ax[i].set_ylabel("Sensor Value", labelpad=12)
-        ax[i].set_title(f"{title} {'(Normalized)' if i % 2 !=0 else''}\n"
-                    f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-                    fontweight='bold',
-                    pad=15
-                    )
+        ax[i].set_title(f"{'Data'}{': Denoised' if i % 2 !=0 else': ReSampling Period = 900s'}\n", y=1.0, pad=8)
 
         # Set axis limits
-        ax[i].margins(x=0.01,y=0.01)
-        ax[i].set_ylim(top=ymax if ymax else None)
+        ax[i].margins(x=0.01, y=0.01)
+        #ax[i].set_ylim(top=ymax if ymax else None)
         #ax.set_xlim(left=start_time, right=end_time)
 
         # Set tick frequencies
@@ -350,7 +347,58 @@ def plot_all_normalization(df: pd.DataFrame, title: str = "Sensor Readings Over 
         ax[i].grid(True, which="major", linestyle="--", linewidth=0.5)
         ax[i].legend(title="Sensors", loc="upper right")
 
-    plt.tight_layout()
+
+    # scaled
+    for i, df in enumerate(scaled_dfs):
+
+        for col in sensor_cols:
+            # NOTE: plot with priority 
+            base = col.lower().split(" (")[0] # Get base property name (remove units in parentheses)
+            z_order = get_priority_zorder(base)
+            ax[i+2].plot(renamed_df.index, df[col], label=col, linewidth=1, zorder=z_order)
+
+        # Isolate times for title
+        start_time = df["timestamp"].iloc[0]
+        end_time = df["timestamp"].iloc[-1]
+
+        # Labels and title
+        ax[i+2].set_xlabel("Time", labelpad=12)
+        ax[i+2].set_ylabel("Sensor Value", labelpad=12)
+        ax[i+2].set_title(f"{'Scaled Data'}{': Denoised' if i % 2 !=0 else': ReSampling Period = 900s'}\n", y=1.0, pad=8)
+
+        # Set axis limits
+        ax[i+2].margins(x=0.01, y=0.01)
+        ax[i+2].set_ylim(top=ymax)
+        #ax.set_xlim(left=start_time, right=end_time)
+
+        # Set tick frequencies
+        ymin, ymax_actual = ax[i].get_ylim()
+        y_range = ymax - ymin if ymax else ymax_actual - ymin
+        raw_ytick_step = y_range / 5  # target ~5 major ticks
+        ytick_step = round_data_tick_size(raw_ytick_step)
+        ax[i+2].yaxis.set_major_locator(MultipleLocator(ytick_step))
+
+        x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)    
+        raw_xtick_step = x_range / 5 # Target: ~5 x-axis ticks
+        xtick_step = round_data_tick_size(raw_xtick_step)
+        ax[i+2].xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
+        ax[i+2].xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+
+        # Grid and legend
+        ax[i+2].grid(True, which="major", linestyle="--", linewidth=0.5)
+        ax[i+2].legend(title="Sensors", loc="upper right")
+
+
+    # Add overall title
+    fig.suptitle(f"{title}\n"
+                 f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+                 fontweight='bold',
+                 y=0.98,
+                 x=0.51
+                 )
+
+    # Adjust layout to make space for subtitle
+    plt.subplots_adjust(top=0.94, hspace=0.3)
     plt.show()
 
 def plot_all(df: pd.DataFrame, title: str = "Sensor Readings Over Time", ymax: float = None, normalized: bool = False) -> None:
@@ -377,7 +425,7 @@ def plot_all(df: pd.DataFrame, title: str = "Sensor Readings Over Time", ymax: f
     plot_df = plot_df.set_index("timestamp")
 
     # Define figure and axes for subplots
-    fig, ax = plt.subplots(figsize=(14, 10))
+    fig, ax = plt.subplots(figsize=(16, 10))
 
     # Get sensor columns
     sensor_cols = plot_df.columns.tolist()
@@ -459,7 +507,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, title: str = "Oxygen vs", normaliz
 
     # Create subplots
     num_sensors = len(sensor_cols)
-    fig, axs = plt.subplots(num_sensors, 1, figsize=(12, 3 * num_sensors))
+    fig, axs = plt.subplots(num_sensors, 1, figsize=(16, 3 * num_sensors))
 
     # Plot each sensor vs oxygen
     for i, sensor_col in enumerate(sensor_cols):
@@ -467,7 +515,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, title: str = "Oxygen vs", normaliz
         ax2 = ax.twinx()
 
         ax.plot(plot_df.index, plot_df[oxygen_col], color='blue', label='Oxygen', linewidth=1)
-        ax.set_ylabel('Oxygen', color='blue', labelpad=12)
+        ax.set_ylabel('Oxygen ()', color='blue', labelpad=12)
         ax.tick_params(axis='y', labelcolor='blue')
 
         ax2.plot(plot_df.index, plot_df[sensor_col], color='red', label=sensor_col, linewidth=1)
@@ -506,7 +554,6 @@ def subplot_all_with_oxygen(df: pd.DataFrame, title: str = "Oxygen vs", normaliz
                  x=0.51
                  )
                  
-
     # Adjust layout to make space for subtitle
-    plt.subplots_adjust(top=0.93, hspace=0.4)
+    plt.subplots_adjust(top=0.92, hspace=0.4)
     plt.show()
