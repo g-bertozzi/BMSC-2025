@@ -33,11 +33,11 @@ place = {
     }
 }
 
-# Schema: sensorCategoryCodes, propertyCode, name, unit
+# Schema: sensorCategoryCodes : {propertyCode, name, unit}
 sensor_info = {
-    "C": {"sensorCategoryCodes": "conductivity", "propertyCode": "conductivity", "name": "Conductivity", "unit": "S/m"},
-    "T": {"sensorCategoryCodes": "temperature", "propertyCode": "seawatertemperature", "name": "Temperature", "unit": "°C"},
-    "D": {"sensorCategoryCodes": "density", "propertyCode": "density", "name": "Density", "unit": "kg/m3"},
+    "conductivity": {"propertyCode": "conductivity", "name": "Conductivity", "unit": "S/m"},
+    "temperature": {"propertyCode": "seawatertemperature", "name": "Temperature", "unit": "°C"},
+    "density": {"propertyCode": "density", "name": "Density", "unit": "kg/m3"},
 }
 
 """ 
@@ -51,7 +51,7 @@ NOTE goals:
 - longer term plot of mount data, with marks for where casts are
 
 """
-def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: str) -> pd.DataFrame:
+def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: str, resample: int = None) -> pd.DataFrame:
     """
     Fetches scalar data for CTDs given a given location, sensor properties and time window. 
     Returns a merged DataFrame with timestamps and sensor values.
@@ -68,13 +68,26 @@ def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: s
                     schema: timestamp: datetime obj, {prop}: int or float
     """
 
-    params = {
+    if resample:
+        params = {
+        "locationCode": locationCode,
+        "deviceCategoryCode": "CTD",
+        "sensorCategoryCodes": sensorCategoryCodes,
+        "dateFrom": start,
+        "dateTo" : end,
+        "metadata": "minimum",
+        "qualityControl": "clean",
+        "resamplePeriod": resample,
+        "resampleType": "avg"
+        }
+    else:
+        params = {
         "locationCode": locationCode,
         "deviceCategoryCode": "CTD",
         "sensorCategoryCodes": sensorCategoryCodes,
         "dateFrom": start,
         "dateTo" : end
-    }
+        }
 
     # JSON response from ONC
     result = my_onc.getScalardata(params)
@@ -219,76 +232,89 @@ def get_cast_info(cast_df: pd.DataFrame, depth_threshold: int) -> list[dict]:
     return casts
 
 
-def plot_cast_depth_vs_temp(start: pd.Timestamp, end: pd.Timestamp, locationCode: str, df: pd.DataFrame, depth_threshold: int) -> None:
+def plot_longterm_mount(df: pd.DataFrame, locationCode: str, sensor_cols: list[str], title: str = None) -> None:
     """
-    Plots CTD cast: Temperature vs Depth, ignoring time axis.
+    Plots long-term mount data for multiple sensor parameters (e.g., temperature, density, conductivity).
 
     Parameters:
-        start (pd.Timestamp): Start time.
-        end (pd.Timestamp): End time.
-        locationCode (str): Label for plot title.
-        df (pd.DataFrame): DataFrame with 'timestamp', 'temperature', and 'depth'.
-        depth_threshold (int): Minimum depth to include.
+        df (pd.DataFrame): Must contain 'timestamp' and one or more sensor parameter columns.
+        locationCode (str): ONC locationCode.
+        title (str): Optional custom title.
 
     Returns:
         None
     """
-    
-    # Filter by time and depth
-    df_int = df[
-        (df["timestamp"] >= start) &
-        (df["timestamp"] <= end) &
-        (df["depth"] >= depth_threshold)
-    ].sort_values("depth")
+    df = df.copy().sort_values("timestamp").set_index("timestamp")
 
-    if df_int.empty:
-        print(f"Skipping empty cast interval: {start} to {end}")
-        return
 
-    # Plot
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(df_int["temperature"], df_int["depth"], color="tab:blue", label="CTD Temperature")
-    ax.set_xlabel("Temperature (°C)")
-    ax.set_ylabel("Depth (m)")
-    ax.invert_yaxis()
-    ax.set_title(
-        f"{place[locationCode]["name"]}\n"
-        f"{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%b %d, %Y')}",
-        fontweight="bold"
-    )
-    ax.grid(True)
-    ax.legend()
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for col in sensor_cols:
+        meta = sensor_info[col]
+        label = f"{meta['name']} ({meta['unit']})"
+        ax.plot(df.index, df[col], label=label)
+
+    ax.set_title(f"CTD Mount\n{place[locationCode]['name']}", fontweight="bold")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Sensor Value")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+    ax.grid(True, linestyle="--", alpha=0.6)
+    plt.legend()
     plt.tight_layout()
     plt.show()
 
-def plot_mount_temp(start: pd.Timestamp, end: pd.Timestamp, locationCode: str, df: pd.DataFrame) -> None:
+def subplot_longterm_mount(df: pd.DataFrame, locationCode: str, title: str = None) -> None:
     """
-    Plots a temperature time-series with fewer time labels.
+    Subplots long-term mount data for all 3 sensor parameters (i.e. temperature, density, conductivity).
+
+    Parameters:
+        df (pd.DataFrame): Must contain 'timestamp' and one or more sensor parameter columns.
+        locationCode (str): ONC locationCode.
+        title (str): Optional custom title.
+
+    Returns:
+        None
+
     """
-    # Fetch df of mount data from specified dates
-    df = get_property(start, end, locationCode, "CTD", "temperature,oxygen")
+        # Isolate times for title
+    start_time = df["timestamp"].iloc[0]
+    end_time = df["timestamp"].iloc[-1]
 
-    df_int = df[(df["timestamp"] >= start) & (df["timestamp"] <= end)]
+    df = df.copy().sort_values("timestamp").set_index("timestamp")
+    sensor_cols = df.columns.to_list()
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(df_int["timestamp"], df_int["temperature"], label="Mount Temperature")
-    ax.set_xlabel("Time (UTC)")
-    ax.set_ylabel("Temperature (°C)")
-    ax.set_xlim([start - pd.Timedelta(seconds=1), end + pd.Timedelta(seconds=1)])
+    fig, axes = plt.subplots(figsize=(14, 18), nrows=3, ncols=1)
 
-    ax.xaxis.set_major_locator(mdates.SecondLocator(interval=10))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-    plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
+    for i, col in enumerate(sensor_cols):
+        meta = sensor_info[col]
+        label = f"{meta['name']} ({meta['unit']})"
 
-    title_str = f"{place[locationCode]["name"]}\n{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%B %d, %Y')}"
-    ax.set_title(title_str, fontweight="bold")
+        ax = axes[i]
 
-    ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend()
-    plt.tight_layout()
+        ax.plot(df.index, df[col], color="tab:blue", label=label)
+
+        # TODO: fix x axis lims
+        ax.set_title(f"{place[locationCode]['name']} - {sensor_info[col]["name"]} ({sensor_info[col]["unit"]})")
+        ax.set_ylabel(label, labelpad=15)
+        ax.set_xlabel("Date", labelpad=10)
+        ax.grid(True, linestyle="--", alpha=0.6)
+        ax.legend()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+
+    fig.suptitle(f"{place[locationCode]['name']} CTD Mount\n"
+                f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+                fontweight='bold',
+                y=0.97,
+                x=0.51
+                )
+
+    # Adjust layout to make space for subtitle
+    plt.subplots_adjust(top=0.93, hspace=0.21)
+
     plt.show()
 
 # TODO: make a version of this function that will subplot casts and mounts with either: conductivity, temp, or
+# TODO: make input df able to have all CTD props for the time frame and select temp/ one?
 def subplot_cast_and_mount_temp_by_place(dataframes: list[pd.DataFrame], locationCode: str) -> None:
     """
     Plots cast and mount temperature as color gradients vs. time and depth. Works for inputs of 1 or 2 casts.
