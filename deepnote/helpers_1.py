@@ -5,6 +5,7 @@ import json
 from typing import List, Tuple
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+
 import numpy as np
 
 from functools import reduce
@@ -17,8 +18,30 @@ token = os.getenv("ONC_TOKEN")
 # Create ONC client
 my_onc = onc.ONC(token)
 
-places = {"FGPPN": "Folger Pinnacle", "FGPD": "Folger Deep", "CF341": "Cast at Folger Pinnacle", "CF340": "Cast at Folger Deep"}
+place = {
+    "FGPPN": 
+    {
+        "name": "Folger Pinnacle",
+        "mountCode": "FGPPN",
+        "castCode":"CF341",
+        "mountDepth": 23
+    },
+    "FGPD": 
+    {
+        "name": "Folger Deep",
+        "mountCode": "FGPD",
+        "castCode": "CF340",
+        "mountDepth": 93
+    }
+}
+def get_dataframes(start: str, end: str, locationCode: str, mountSensorCategoryCode: str, castSensorCategoryCode: str) -> list[pd.DataFrame]:
+    """
+    So that I dont have to keep making api calls-> yes i will have to continuously put the dataframes as parameters
 
+    """
+
+
+    
 
 def get_property(start: str, end: str, locationCode: str, deviceCategoryCode: str, sensorCategoryCode: str) -> pd.DataFrame:
     """
@@ -77,8 +100,7 @@ def get_property(start: str, end: str, locationCode: str, deviceCategoryCode: st
     # merge dataframes by joining on timestamp    
     df_merged = reduce(lambda left, right: pd.merge(left, right, on="timestamp", how="outer"), dfs)
     df_merged.sort_values("timestamp", inplace=True)
-    
-    df_merged.head()
+
     return df_merged
 
 def detect_cast_intervals(df: pd.DataFrame, gap_threshold_minutes: int = 10) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
@@ -222,10 +244,9 @@ def plot_cast_depth_vs_temp(start: pd.Timestamp, end: pd.Timestamp, locationCode
     ax.plot(df_int["temperature"], df_int["depth"], color="tab:blue", label="CTD Temperature")
     ax.set_xlabel("Temperature (°C)")
     ax.set_ylabel("Depth (m)")
-    #ax.invert_xaxis()
     ax.invert_yaxis()
     ax.set_title(
-        f"{places[locationCode]}\n"
+        f"{place[locationCode]["name"]}\n"
         f"{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%b %d, %Y')}",
         fontweight="bold"
     )
@@ -244,21 +265,22 @@ def round_data_tick_size(value):
 
     if residual < 1.5:
         nice = 1
-    elif residual < 3:
+    elif residual < 2:
         nice = 2
+    elif residual < 3:
+        nice = 3
     elif residual < 7:
         nice = 5
     else:
         nice = 10
-
     return nice * magnitude
 
-def plot_mount_temp_vs_time(start: pd.Timestamp, end: pd.Timestamp, locationCode: str, df: pd.DataFrame) -> None:
+def plot_mount_temp(start: pd.Timestamp, end: pd.Timestamp, locationCode: str, df: pd.DataFrame) -> None:
     """
     Plots a temperature time-series with fewer time labels.
     """
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
+    # Fetch df of mount data from specified dates
+    df = get_property(start, end, locationCode, "CTD", "temperature,oxygen")
 
     df_int = df[(df["timestamp"] >= start) & (df["timestamp"] <= end)]
 
@@ -272,22 +294,41 @@ def plot_mount_temp_vs_time(start: pd.Timestamp, end: pd.Timestamp, locationCode
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
     plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
 
-    title_str = f"{places[locationCode]}\n{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%B %d, %Y')}"
+    title_str = f"{place[locationCode]["name"]}\n{start.strftime('%H:%M:%S')} to {end.strftime('%H:%M:%S')} {end.strftime('%B %d, %Y')}"
     ax.set_title(title_str, fontweight="bold")
 
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend()
     plt.tight_layout()
     plt.show()
-def cast_and_mount_temp_plot(
-    cast_df: pd.DataFrame,
-    mount_df: pd.DataFrame,
-    mount_depth_m: int,
-    locationCode: str,
-    title: str
-) -> None:
+
+
+
+def subplot_cast_and_mount_temp_by_place(start: pd.Timestamp, end: pd.Timestamp, locationCode: str) -> None:
     """
-    Plots cast and mount temperature as color gradients vs. time and depth.
+    Retrieves cast and mount data for a given location and time range, and visualizes them using temperature vs. time and depth subplots.
+
+    Parameters:
+        start (pd.Timestamp): Start time of the data window.
+        end (pd.Timestamp): End time of the data window.
+        locationCode (str): ONC location code (e.g., "FGPPN").
+
+    Returns:
+        None
+    """
+    castCode = place[locationCode]["castCode"]
+    mountDepth = place[locationCode]["mountDepth"]
+
+    # Fetch cast data (depth and temperature) and mount data (temperature and oxygen)
+    cast_df = get_property(start, end, castCode, "CTD", "depth,temperature") # NOTE: hardcoded for properties for cast vs mount
+    mount_df = get_property(start, end, locationCode, "CTD", "temperature,oxygen")
+
+    # Plot temperature profiles for cast and mount sensors
+    subplot_temp_profiles(cast_df=cast_df, mount_df=mount_df, mount_depth_m=mountDepth, locationCode=locationCode)
+
+def subplot_temp_profiles(cast_df: pd.DataFrame, mount_df: pd.DataFrame, mount_depth_m: int, locationCode: str) -> None:
+    """
+    Plots cast and mount temperature as color gradients vs. time and depth. Works for inputs of 1 or 2 casts.
 
     Cast data is plotted at measured depths.
     Mount data is plotted at fixed depth (mount_depth_m), colored by temperature.
@@ -299,31 +340,39 @@ def cast_and_mount_temp_plot(
         locationCode (str): ONC location code
         title (str): Plot title
     """
+    # returns a list of dicts containg info on each cast
     cast_info = get_cast_info(cast_df=cast_df, depth_threshold=mount_depth_m)
+    num_casts = len(cast_info)
 
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(14, 10), sharex=False)
-    axes = axes.flatten()
+    fig, axes = plt.subplots(nrows=num_casts, ncols=2, figsize=(14, 5*num_casts), sharex=False)
+    axes = axes.flatten() # make 1D
 
-    for i, cur in enumerate(cast_info[:2]):  # limit to 2 casts (2x2 grid)
+    for i, cur in enumerate(cast_info):
+
+        # isolate df for each time series
         cast = cast_df[(cast_df["timestamp"] >= cur["start"]) & (cast_df["timestamp"] <= cur["end"])]
         mount = mount_df[(mount_df["timestamp"] >= cur["start"]) & (mount_df["timestamp"] <= cur["end"])]
 
         cast_deep = cast_df[(cast_df["timestamp"] >= cur["deep_start"]) & (cast_df["timestamp"] <= cur["deep_end"])]
         mount_deep = mount_df[(mount_df["timestamp"] >= cur["deep_start"]) & (mount_df["timestamp"] <= cur["deep_end"])]
 
-        for j, (c, m, label) in enumerate([(cast, mount, "Entire"), (cast_deep, mount_deep, "Deep")]):
-            ax = axes[i * 2 + j]
+        # GLOBAL color limits (defined outside the loop) NOTE: hardcoded for specific casts
+        vmin = 8
+        vmax = 16
+
+        # Iterate through entire and deep section for each cast
+        for j, (c, m, label) in enumerate([(cast, mount, "Entire Cast"), (cast_deep, mount_deep, "Deep Section")]):
+            ax = axes[i * 2 + j] # to iterate through 2D grid
+
+            # Error handle: no data returned
             if c.empty or m.empty:
                 ax.set_title(f"No data | {label} Cast {i}")
                 continue
 
-            vmin = min(c["temperature"].min(), m["temperature"].min())
-            vmax = max(c["temperature"].max(), m["temperature"].max())
-
             sc_cast = ax.scatter(
                 c["timestamp"], c["depth"],
                 c=c["temperature"],
-                cmap="viridis",
+                cmap="turbo",
                 s=20,
                 edgecolor="none",
                 label="Cast",
@@ -333,7 +382,7 @@ def cast_and_mount_temp_plot(
             sc_mount = ax.scatter(
                 m["timestamp"], [mount_depth_m] * len(m),
                 c=m["temperature"],
-                cmap="viridis",
+                cmap="turbo",
                 s=20,
                 edgecolor="none",
                 marker="s",
@@ -341,6 +390,26 @@ def cast_and_mount_temp_plot(
                 vmin=vmin, vmax=vmax
             )
 
+            # Compute min and max temperature for this subplot
+            local_min = min(c["temperature"].min(), m["temperature"].min())
+            local_max = max(c["temperature"].max(), m["temperature"].max())
+
+            # Label local temp mins and maxes
+            ax.text(
+                0.04, 0.11 if num_casts == 2 else 0.15, f"Min: {local_min:.3f}°C\nMax: {local_max:.3f}°C", # NOTE: hardcoded positions for specific casts
+                             transform=ax.transAxes,
+                fontsize=8,
+                verticalalignment='top',
+                horizontalalignment='left',
+                bbox=dict(
+                    facecolor='lightgrey',
+                    edgecolor='grey',
+                    boxstyle='round',
+                    linewidth=0.8
+                )
+            )
+
+            # Label axes and titles
             ax.set_xlabel("Time (UTC)", labelpad=10)
             ax.set_ylabel("Depth (m)", labelpad=10)
             ax.invert_yaxis()
@@ -348,19 +417,22 @@ def cast_and_mount_temp_plot(
             ax.set_title(f"{label} | Cast {i+1}", pad=10)
             ax.legend()
             ax.grid(True)
+            
+            # Isolate for title and x axis
+            start_time = c["timestamp"].min()
+            end_time = c["timestamp"].max()
 
-            # Format time axis with ~5 clean ticks
-            duration = (c["timestamp"].max() - c["timestamp"].min()).total_seconds()
-            target_step = duration / 5
-            nice_step = round_data_tick_size(target_step)
-            ax.xaxis.set_major_locator(mdates.SecondLocator(interval=nice_step))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            # Format x axis for 5 ticks
+            ticks = pd.date_range(start=start_time, end=end_time, periods=5)
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([t.strftime('%H:%M:%S') for t in ticks])
 
             cbar = plt.colorbar(sc_cast, ax=ax)
-            cbar.set_label("Temperature (°C)", labelpad=10)
+            cbar.set_label("Temperature (°C)", labelpad=13)
+            cbar.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.3f}")) # set sig fig default to 3
 
     # Adjust layout to make space for subtitle
-    plt.subplots_adjust(top=0.92, hspace=0.4)
-    fig.suptitle(f"{places[locationCode]} - {title}", fontsize=14, fontweight="bold")
-    #fig.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.subplots_adjust(top=0.89 if locationCode == "FGPPN" else 0.79, hspace=0.3, wspace=0.3)  # NOTE: hardcoded positions for specific casts
+    fig.suptitle(f"{place[locationCode]["name"]}\n{start_time.strftime('%B %d, %Y')}", y=0.97, fontsize=14, fontweight="bold")
+
     plt.show()
