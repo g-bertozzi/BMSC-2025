@@ -305,7 +305,7 @@ def subplot_longterm_mount(df: pd.DataFrame, locationCode: str, title: str = Non
                 f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
                 fontweight='bold',
                 y=0.97,
-                x=0.51
+                x=0.515
                 )
 
     # Adjust layout to make space for subtitle
