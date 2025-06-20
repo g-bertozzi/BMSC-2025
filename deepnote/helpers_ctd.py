@@ -67,6 +67,7 @@ def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: s
         pd.DataFrame: DataFrame containing merged sensor values with a timestamp index.
                     schema: timestamp: datetime obj, {prop}: int or float
     """
+    print(f"Requesting CTD data at {locationCode} from {start} to {end}") # NOTE: debugging
 
     if resample:
         params = {
@@ -118,6 +119,11 @@ def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: s
     df_merged = reduce(lambda left, right: pd.merge(left, right, on="timestamp", how="outer"), dfs)
     df_merged.sort_values("timestamp", inplace=True)
 
+    start_time = df_merged["timestamp"].iloc[0]
+    end_time = df_merged["timestamp"].iloc[-1]
+
+    print(f"Dataframe start: {start_time} Dataframe end: {end_time}") # NOTE: debugging
+
     return df_merged
 
 def detect_cast_intervals(df: pd.DataFrame, gap_threshold_minutes: int = 10) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
@@ -153,7 +159,7 @@ def detect_cast_intervals(df: pd.DataFrame, gap_threshold_minutes: int = 10) -> 
     ]
 
     return intervals
-
+# TODO: make deep just be within say 10m of max depth?
 def detect_deep_intervals(df: pd.DataFrame, depth_threshold: int, gap_threshold_seconds: int = 60) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
     """
     Detects continuous time intervals where depth exceeds a threshold.
@@ -280,10 +286,13 @@ def subplot_longterm_mount(df: pd.DataFrame, locationCode: str, title: str = Non
     start_time = df["timestamp"].iloc[0]
     end_time = df["timestamp"].iloc[-1]
 
+    # print(f"Subplotting CTD data at {place[locationCode]["name"]} from {start_time} to {end_time}")
+
+
     df = df.copy().sort_values("timestamp").set_index("timestamp")
     sensor_cols = df.columns.to_list()
 
-    fig, axes = plt.subplots(figsize=(14, 18), nrows=3, ncols=1)
+    fig, axes = plt.subplots(figsize=(14, 15), nrows=3, ncols=1)
 
     for i, col in enumerate(sensor_cols):
         meta = sensor_info[col]
@@ -294,7 +303,7 @@ def subplot_longterm_mount(df: pd.DataFrame, locationCode: str, title: str = Non
         ax.plot(df.index, df[col], color="tab:blue", label=label)
 
         # TODO: fix x axis lims
-        ax.set_title(f"{place[locationCode]['name']} - {sensor_info[col]["name"]} ({sensor_info[col]["unit"]})")
+        ax.set_title(f'{place[locationCode]["name"]} - {sensor_info[col]["name"]} ({sensor_info[col]["unit"]})')
         ax.set_ylabel(label, labelpad=15)
         ax.set_xlabel("Date", labelpad=10)
         ax.grid(True, linestyle="--", alpha=0.6)
@@ -309,7 +318,7 @@ def subplot_longterm_mount(df: pd.DataFrame, locationCode: str, title: str = Non
                 )
 
     # Adjust layout to make space for subtitle
-    plt.subplots_adjust(top=0.93, hspace=0.21)
+    plt.subplots_adjust(top=0.92, hspace=0.23)
 
     plt.show()
 
@@ -429,6 +438,6 @@ def subplot_cast_and_mount_temp_by_place(dataframes: list[pd.DataFrame], locatio
 
     # Adjust layout to make space for subtitle
     plt.subplots_adjust(top=0.89 if locationCode == "FGPPN" else 0.79, hspace=0.3, wspace=0.3)  # NOTE: hardcoded positions for specific casts
-    fig.suptitle(f"{place[locationCode]["name"]}\n{start_time.strftime('%B %d, %Y')}", y=0.97, fontsize=14, fontweight="bold")
+    fig.suptitle(f'{place[locationCode]["name"]}\n{start_time.strftime("%B %d, %Y")}', y=0.97, fontsize=14, fontweight="bold")
 
     plt.show()

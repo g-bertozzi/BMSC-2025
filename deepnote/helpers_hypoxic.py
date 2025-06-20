@@ -126,7 +126,7 @@ def get_property(start: str, end: str, locationCode: str, deviceCategoryCode: st
     # TODO: fix oxygen to filter for sensorCategoryCode = "oxygen_corrected"
     #if propertyCode == "oxygen":
 
-    # TODO: optimize - presently doing ruqest fro every porpertyCode, but I think I could limit this ß
+    # TODO: optimize - presently doing ruqest fro every propertyCode, but I think I could limit this ß
 
     params = {
         "locationCode": locationCode,
