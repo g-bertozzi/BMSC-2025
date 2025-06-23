@@ -12,10 +12,10 @@ import seaborn as sns
 
 from functools import reduce
 
-token = os.environ["GRACE_TOKEN"]
-# # from dotenv import load_dotenv
-# # load_dotenv()
-# # token = os.getenv("ONC_TOKEN")
+# token = os.environ["GRACE_TOKEN"]
+from dotenv import load_dotenv
+load_dotenv()
+token = os.getenv("ONC_TOKEN")
 
 # Create ONC client
 my_onc = onc.ONC(token)
@@ -30,7 +30,6 @@ sensor_info = pd.DataFrame([
     {"propertyCode": "salinity", "name": "Salinity", "unit": "psu", "deviceCategoryCode": "CTD"},
     {"propertyCode": "turbidityntu", "name": "Turbidity", "unit": "NTU", "deviceCategoryCode": "FLNTU"},
 ])
-
 
 def find_properties_by_location(locationCode: str):
     """
@@ -260,7 +259,9 @@ def round_data_tick_size(value):
     Round a numeric step size to a 'clean' number: 1, 2, 5, or 10 × 10^n
     """
     import math
+
     magnitude = 10 ** math.floor(math.log10(value))
+
     residual = value / magnitude
 
     if residual < 1.5:
@@ -314,6 +315,9 @@ def plot_all(df: pd.DataFrame, title: str = "Sensor Readings Over Time", ymax: f
     # Isolate times for title
     start_time = df["timestamp"].iloc[0]
     end_time = df["timestamp"].iloc[-1]
+
+    # NOTE: debug
+    print(f"start df: {start_time}, end: {end_time}")
 
     # Labels and title
     ax.set_xlabel("Time", labelpad= 12)
