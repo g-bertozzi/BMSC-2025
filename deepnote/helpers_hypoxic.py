@@ -1,16 +1,13 @@
-import pandas as pd
 import onc
-import os
-import json
-from typing import List, Tuple
+import pandas as pd
+
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import matplotlib.ticker as ticker
 from matplotlib.ticker import MultipleLocator
-import numpy as np
-import seaborn as sns
 
-from functools import reduce
+from functools import reduce # used for dataframes
+
+import os
 
 # token = os.environ["GRACE_TOKEN"]
 from dotenv import load_dotenv
@@ -182,6 +179,8 @@ def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Smoothed and filtered DataFrame (same shape).
     """
+    import numpy as np
+
     window = 12  # Size of the rolling window for smoothing
     z_thresh = 3.0  # Z-score threshold for outlier detection
 

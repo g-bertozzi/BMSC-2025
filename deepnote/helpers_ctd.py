@@ -1,12 +1,13 @@
-import pandas as pd
 import onc
-import os
-import json
+import pandas as pd
+
 from typing import List, Tuple
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import numpy as np
-from functools import reduce
+
+from functools import reduce # used for dataframes
+
+import os
 
 # token = os.environ["GRACE_TOKEN"]
 from dotenv import load_dotenv
