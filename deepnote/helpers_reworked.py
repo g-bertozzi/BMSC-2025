@@ -4,6 +4,7 @@ import pandas as pd
 from typing import List, Tuple
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.ticker import MultipleLocator
 
 from functools import reduce # used for dataframes
 
@@ -28,7 +29,39 @@ my_onc = onc.ONC(token)
 3. maybe: plot the casts vs mounts? - this would be 2023 though
 """
 
-# SCHEMA: deviceCategoryCode : [{propertyCode, name (unit)}]
+# TODO: make cast plot dunctions consider within 10m of mount depth to be "deep"
+"""
+Global metadata dictionary for each location - e.g. FGPD, FGPPN
+
+Useful for accessing name for titles, mount vs cast codes, mount depths, and range considered deep for casts.
+
+SCHEMA: locationCode: {name, mountCode, castCode, mountDepth, depthThreshold}
+"""
+place = {
+    "FGPPN": {
+        "name": "Folger Pinnacle",
+        "mountCode": "FGPPN",
+        "castCode":"CF341",
+        "mountDepth": 23,
+        "depthThreshold": 20 # depth to be considered for deep section
+    },
+    "FGPD": {
+        "name": "Folger Deep",
+        "mountCode": "FGPD",
+        "castCode": "CF340",
+        "mountDepth": 90,
+        "depthThreshold": 85
+    }
+}
+
+# TODO: make a defualt color for each property to be plotted in
+"""
+Global metadata dictionary for each device category - e.g. CTD
+
+Useful for naming dataframe columns with clean, capitlzed names and units.
+
+SCHEMA: deviceCategoryCode : [{propertyCode, name (unit)}]
+"""
 device_info = {
     "OXYSENSOR": [{"propertyCode": "oxygen", "name": "Oxygen (ml/l)", "sensorCategoryCode": "oxygen_corrected"}],
     "radiometer": [{"propertyCode": "parphotonbased", "name": "PAR (µmol/m²/s)"}],
@@ -39,6 +72,7 @@ device_info = {
             {"propertyCode": "density", "name": "Density (kg/m3)"}],
     }
 
+# FETCHING DATA
 def get_device_parameters(start: str, end: str, locationCode: str, deviceCategoryCode: str, resample: int = None) -> dict:
     """
     Constructs the parameters dictionary for querying ONC scalar data for a specific device category, location, and time window.
@@ -106,11 +140,13 @@ def get_device_parameters(start: str, end: str, locationCode: str, deviceCategor
                 "dateTo" : end,
             }
 
-    print(f"Parameters: {params}")
+    # NOTE: optional
+    # print(f"Parameters: {params}")
     
     return params
 
-def get_device_dataframe( start: str, end: str, locationCode: str, result: dict) -> pd.DataFrame: # result is JSON
+# MAKING DATAFRAME
+def get_device_dataframe(start: str, end: str, locationCode: str, result: dict) -> pd.DataFrame:
     """ 
     Converts an ONC JSON response into a single merged DataFrame for one location and device.
 
@@ -146,17 +182,17 @@ def get_device_dataframe( start: str, end: str, locationCode: str, result: dict)
 
         # Default to raw property name if no match
         column_title = prop
-
-        # Look for a matching entry in device_info dictionary
-        for devCat in device_info: # go through each deviceCategoryCode
-            for dev in device_info[devCat]: # go through each property  
-                if dev["propertyCode"] in prop or prop in dev["propertyCode"]: # check if this is the current property
-                    column_title = dev["name"]  # already includes unit, e.g., "Oxygen (ml/l)"
+        
+        # Match the propertyCode to a human-readable name from device_info (with unit)
+        for devCat in device_info:  # loop through device categories
+            for dev in device_info[devCat]:  # loop through sensor definitions
+                if dev["propertyCode"] in prop or prop in dev["propertyCode"]:
+                    column_title = dev["name"]  # e.g., "Temperature (°C)"
                     break
 
         # Populate dataframe with induvidual sensor property
         df = pd.DataFrame({
-            "Time": pd.to_datetime(times), # convert strings to datetime objects
+            "Time": pd.to_datetime(times), # Convert strings to datetime objects
             column_title: values,
         })
         dfs.append(df)
@@ -190,14 +226,106 @@ def merge_device_dataframes(dfs: List[pd.DataFrame]) -> pd.DataFrame:
 
     return merged_df
 
-def plot_dataframe(df: pd.DataFrame) -> None:
-    """
-    Overlays plots of each sensor (column in dataframe) against time.
 
+# FURTHER PROCESSING
+def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
     """
+    Applies rolling mean smoothing and rolling z-score outlier filtering 
+    to all data (i.e. numeric) columns in the DataFrame.
+
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with 'Time' and sensor data.
+
+    Returns:
+        pd.DataFrame: Smoothed and filtered DataFrame (same shape).
+    """
+    import numpy as np
+
+    window = 12  # Size of the rolling window for smoothing
+    z_thresh = 3.0  # Z-score threshold for outlier detection
+
+    smoothed_df = df.copy()  # Work on a copy to preserve the original
+
+    # Apply rolling smoothing and z-score filtering to each numeric column
+    for col in smoothed_df.columns:
+        # Compute rolling mean and std deviation using centered window
+        roll_mean = smoothed_df[col].rolling(window=window, center=True).mean()
+        roll_std = smoothed_df[col].rolling(window=window, center=True).std()
+
+        # Calculate z-scores for detecting outliers
+        z_scores = (smoothed_df[col] - roll_mean) / roll_std
+
+        # Replace values with rolling mean where the z-score is within the threshold; otherwise set to NaN
+        smoothed_df[col] = roll_mean.where(z_scores.abs() < z_thresh, np.nan)
+
+    return smoothed_df
+
+
+# PLOTTING FUNCTIONS
+def plot_dataframe(df: pd.DataFrame, locationCode: str, columns: str = None, smooth: bool = False) -> None:
+    """
+    Overlays sensor columns in a single time series plot, indexed by 'Time'.
+    Optionally filters by column list and applies smoothing to remove noise/outliers.
+
+    Parameters:
+        df (pd.DataFrame): A DataFrame indexed by time, with one or more numeric sensor columns.
+        locationCode (str): ONC location code used to label the plot.
+        columns (str, optional): Comma-separated list of columns to plot. Defaults to all.
+        smooth (bool, optional): Whether to apply rolling smoothing and outlier filtering. Default is False.
+
+    Returns:
+        None
+    """
+    # Define figure and axes for subplots
+    fig, ax = plt.subplots(figsize=(16, 10), nrows= 1, ncols= 1)
+
+    # Determine which columns to plot
+    if columns:
+        selected_cols = [col.strip() for col in columns.split(",")]
+        plot_df = df[selected_cols]
+    else:
+        plot_df = df
+
+    plot_df = smooth_df(plot_df) if smooth else plot_df
+
+    # To format title
+    start_time = plot_df.index[0].strftime("%d/%m/%y")
+    end_time = plot_df.index[-1].strftime("%d/%m/%y")
+    column_list = list(plot_df.columns)
+    plot_title = ", ".join(column_list)
+
+    # Plot each column
+    for column in plot_df:
+        ax.plot(plot_df.index, plot_df[column], label=column, linewidth=0.8) # plot without priority
+    
+    # Label axes
+    ax.set_xlabel("Time", labelpad=13)
+    ax.set_ylabel("Sensor Value", labelpad=13)
+
+    ax.set_title(f"{place[locationCode]["name"]} -  {plot_title}\n"
+                 f"{start_time} to {end_time}", 
+                 fontweight="bold", 
+                 pad=14,)
+
+    # Format x-axis as dates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    ax.tick_params(axis="x")
+
+    # TODO: make y axis ticks more frequent
+
+    # Add grid and legend
+    ax.grid(True, which="major", linestyle="--", linewidth=0.5)
+    ax.legend(title="Sensors", loc="best")
+
+
+    # Adjust layout to make space for subtitle
+    # plt.subplots_adjust(top=0.93, hspace=0.3)
+
+    plt.show()
     
      
-def subplot_dataframe(df: pd.DataFrame) -> None:
+def subplot_dataframe(df: pd.DataFrame, locationCode: str, columns: str = None, smooth: bool = False) -> None:
      """ 
      Subplots each sensor (column in dataframe) against time.
 
