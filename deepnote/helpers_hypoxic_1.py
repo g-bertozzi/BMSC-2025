@@ -17,41 +17,50 @@ token = os.getenv("ONC_TOKEN")
 # Create ONC client
 my_onc = onc.ONC(token)
 
-# schema: propertyCode: {label, deviceCategoryCode}
+# schema: propertyCode: {label, deviceCategoryCode, color}
 sensor_info = {
     "oxygen": {
         "label": "Oxygen (ml/l)",
         "deviceCategoryCode": "OXYSENSOR",
+        "color": "royalblue",
     },
     "parphotonbased": {
         "label": "PAR (µmol/m²/s)",
         "deviceCategoryCode": "radiometer",
+        "color": "goldenrod",
     },
     "chlorophyll": {
         "label": "Chlorophyll (µg/l)",
         "deviceCategoryCode": "FLNTU",
+        "color": "darkgreen",
     },
     "seawatertemperature": {
         "label": "Temperature (°C)",
         "deviceCategoryCode": "CTD",
+        "color": "crimson",
     },
     "salinity": {
         "label": "Salinity (psu)",
         "deviceCategoryCode": "CTD",
+        "color": "orange",
     },
     "turbidityntu": {
         "label": "Turbidity (NTU)",
         "deviceCategoryCode": "FLNTU",
+        "color": "slategray",
     },
     "conductivity": {
         "label": "Conductivity (S/m)",
-        "deviceCategoryCode": "CTD"
+        "deviceCategoryCode": "CTD",
+        "color": "mediumorchid",
     },
     "density": {
         "label": "Density (kg/m3)",
-        "deviceCategoryCode": "CTD"
-    }
+        "deviceCategoryCode": "CTD",
+        "color": "darkcyan",
+    },
 }
+
 
 # TODO: make cast plot dunctions consider within 10m of mount depth to be "deep"
 """
@@ -78,67 +87,37 @@ place = {
     }
 }
 
-def fetch_property_result(start: str, end: str, locationCode: str, propertyCode: str, resample: int = None) -> dict:
+def fetch_property_result(start: str, end: str, locationCode: str, propertyCode: str, updates: bool, resample: int = None) -> dict:
     """
     Makes ONC API call to get scalar data for a single propertyCode.
     """
     device_cat = sensor_info[propertyCode]["deviceCategoryCode"]
 
+    # Default parameters
+    params = {
+        "locationCode": locationCode,
+        "deviceCategoryCode": device_cat,
+        "propertyCode": propertyCode,
+        "dateFrom": start,
+        "dateTo" : end,
+    }
+
+    # If resampling
     if resample: 
-        # # If OXYSENSOR, must use sensorCategoryCodes instead of propertyCode
-        # if device_cat == "OXYSENSOR":
-        #         params = {
-        #         "locationCode": locationCode,
-        #         "deviceCategoryCode": device_cat,
-        #         "sensorCategoryCodes": "oxygen_corrected",
-        #         "dateFrom": start,
-        #         "dateTo" : end,
-        #         "metadata": "minimum",
-        #         "qualityControl": "clean",
-        #         "resamplePeriod": resample,
-        #         "resampleType": "avg"
-        #         }
-        # else:
-            # For other devices, use propertyCode list for resampled query
-            params = {
-                "locationCode": locationCode,
-                "deviceCategoryCode": device_cat,
-                "propertyCode": propertyCode,
-                "dateFrom": start,
-                "dateTo" : end,
-                "metadata": "minimum",
-                "qualityControl": "clean",
-                "resamplePeriod": resample,
-                "resampleType": "avg"
-                }
-    else:
-        # # No resampling: same distinction between OXYSENSOR and other devices
-        # if device_cat == "OXYSENSOR":
-        #         params = {
-        #         "locationCode": locationCode,
-        #         "deviceCategoryCode": device_cat,
-        #         "sensorCategoryCodes": "oxygen_corrected",
-        #         "dateFrom": start,
-        #         "dateTo" : end,
-        #         }
-        # else:   
-            params = {
-                "locationCode": locationCode,
-                "deviceCategoryCode": device_cat,
-                "propertyCode": propertyCode,
-                "dateFrom": start,
-                "dateTo" : end,
-            }
-    
-    # multiple types of oxygen avaliable
+        params["metadata"] = "minimum"
+        params["qualityControl"] = "clean"
+        params["resamplePeriod"] = resample
+        params["resampleType"] = "avg"
+
+    # For oxygen: multiple types of oxygen avaliable
     if device_cat == "OXYSENSOR":
         params["sensorCategoryCodes"] = "oxygen_corrected"
 
-        # multiple oxygen sensors avaliable at FGPD
+        # For oxygen at FGPD: multiple oxygen sensors avaliable
         if locationCode == "FGPD":
             params["locationCode"] = "FGPD.O2"
 
-    print(f"API Request: getScalarData{params}") # NOTE: for clarity
+    #if updates: print(f"API Request: getScalarData{params}") # NOTE: for clarity 
 
     result = my_onc.getScalardata(params)
     return result
@@ -165,7 +144,7 @@ def result_to_dataframe(result: dict, propertyCode: str) -> pd.DataFrame:
     df.sort_index(inplace=True)
     return df
 
-def get_multi_property_dataframe(start: str, end: str, locationCode: str, propertyCodes: list[str], resample: int = None) -> pd.DataFrame:
+def get_multi_property_dataframe(start: str, end: str, locationCode: str, propertyCodes: list[str], resample: int = None, updates: bool = False) -> pd.DataFrame:
     """
     Fetches, formats, and merges multiple properties into one time-indexed DataFrame.
     """
@@ -173,10 +152,10 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
 
     for prop in propertyCodes:
         try:
-            result = fetch_property_result(start, end, locationCode, prop, resample)
+            result = fetch_property_result(start, end, locationCode, prop, updates, resample)
 
             df = result_to_dataframe(result, prop)
-            print(f"Creating data frame for {prop}.\nPreview: {df.columns.tolist()}") # NOTE: for clarity
+            if updates: print(f"Creating data frame for {prop}.\nPreview: {df.columns.tolist()}") # NOTE: for clarity
             if df is not None:
                 dfs.append(df)
         except Exception as e:
@@ -188,11 +167,12 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
     merged_df = reduce(lambda left, right: pd.merge(left, right, on="Time", how="outer"), dfs)
     merged_df.sort_index(inplace=True)
 
-    print(f"Combining data frames for {propertyCodes}") # NOTE: for clarity
+    if updates: print(f"Combining data frames for {propertyCodes}") # NOTE: for clarity TODO: make actually df preview
 
     return merged_df
 
-# TODO: integrate with time as index
+
+
 def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
     """
     Applies rolling mean smoothing and rolling z-score outlier filtering 
@@ -225,26 +205,6 @@ def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
         smoothed_df[col] = roll_mean.where(z_scores.abs() < z_thresh, np.nan)
 
     return smoothed_df
-# TODO: use?
-def get_priority_zorder(sensor_name: str) -> int:
-    """
-    Assigns a plot z-order priority to specific sensor types.
-    Higher z-order means plot on top.
-
-    Parameters:
-        sensor_name (str): Name of the sensor base type (e.g., "oxygen").
-
-    Returns:
-        int: z-order value for plotting.
-    """
-    if "oxygen" in sensor_name:
-        return 5
-    elif "par" in sensor_name:
-        return 4
-    elif "turbidity" in sensor_name:
-        return 3
-    else:
-        return 1
 
 def round_data_tick_size(value):
     """
@@ -270,6 +230,9 @@ def round_data_tick_size(value):
     else:
         return 10 * magnitude
 
+# TODO: integrate ox vx all
+# TODO: fix norm and scale subplot y axis
+
 def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, normalized: bool = False) -> None:
     """
     Plots each numeric sensor column in the DataFrame against time, 
@@ -293,7 +256,21 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
 
     # Get sensor columns
     for col in plot_df.columns:
-        ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8) # NOTE: plot without priority
+
+        #ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8) # NOTE: plot without priority
+
+        # Dynamically match the label to a propertyCode
+        color = "black"  # default color
+        z_order = 1  # default base layer
+
+        for prop, meta in sensor_info.items():
+            if meta["label"] in col:
+                color = meta.get("color", "black")
+                if prop == "oxygen":
+                    z_order = 10  # ensure oxygen is on top
+                break
+        ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8, color=color, zorder=z_order)
+
 
     # Isolate times for title
     start_time = plot_df.index[0]
@@ -311,7 +288,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
             fontweight='bold',
             pad=15
             )
-    
+
     # Set axis limits and margin
     ax.margins(x=0.01,y=0.01)
     ax.set_ylim(top=ymax if ymax else None)
@@ -324,7 +301,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
 
     # --- X-axis ticks ---
     total_days = (end_time - start_time).days
-    x_step = round_data_tick_size(total_days / 5)
+    x_step = round_data_tick_size(total_days / 10)
     ax.xaxis.set_major_locator(mdates.DayLocator(interval=x_step))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
@@ -332,218 +309,186 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
     ax.grid(True, linestyle="--", linewidth=0.5)
     ax.legend(title="Sensors", loc="upper right")
 
+    # Add line to show low ox level
+    ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label='Low Oxygen Threshold (3 ml/l)')
+    ax.legend(loc="upper right")
+        
     plt.tight_layout()
     plt.show()
 
-
-    # Grid and legend
-    ax.grid(True, which="major", linestyle="--", linewidth=0.5)
-    ax.legend(title="Sensors", loc="upper right")
-
-    plt.tight_layout()
-    plt.show()
-
-def plot_all_norm(df: pd.DataFrame, title: str = "Sensor Readings Over Time") -> None:
+def plot_dataframe_norm(df: pd.DataFrame, locationCode: str) -> None:
     """
-    Plots each numeric sensor column in the DataFrame against time, with line priority and unit-labeled legend entries, then subplots the same data but normalized.
+    Plots each sensor column in the DataFrame twice: raw and smoothed (normalized),
+    in vertically stacked subplots.
 
     Parameters:
-        df (pd.DataFrame): DataFrame with 'timestamp' and sensor columns.
-        title (str): Title of the plot.
+        df (pd.DataFrame): DataFrame indexed by time, with labeled sensor columns.
+        locationCode (str): ONC location code, used for plot titles.
 
     Returns:
         None
     """
-
     copy_df = df.copy()
-    plot_df = copy_df # if selected normalized then do so
-    normalized_df = smooth_df(plot_df) # rollowing window mean filter for outliers
+    smoothed_df = smooth_df(copy_df)
 
-    dfs = [plot_df, normalized_df]
+    dfs = [copy_df, smoothed_df]
+    titles = ["", " - Smoothed"]
 
-    # TODO: confrim
-    plot_df = plot_df.set_index("Time")
-    normalized_df = normalized_df.set_index("Time")
+    fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(16, 12))
 
-    # Define figure and axes for subplots
-    fig, ax = plt.subplots(figsize=(16, 20), nrows=2, ncols=1)
+   
 
-    # Get sensor columns
-    sensor_cols = plot_df.columns
-    
-    for i, df in enumerate(dfs):
+    for i, ax in enumerate(axes):
+        added_hypoxia_label = False
+        plot_df = dfs[i]
 
-        for col in sensor_cols:
-            # NOTE: plot with priority 
-            base = col.lower().split(" (")[0] # Get base property name (remove units in parentheses)
-            z_order = get_priority_zorder(base)
-            ax[i].plot(plot_df.index, df[col], label=col, linewidth=1, zorder=z_order)
+        for col in plot_df.columns:
 
-        # Isolate times for title
+            # Dynamically match the label to a propertyCode
+            color = "black"  # default color
+            z_order = 1  # default base layer
+
+            for prop, meta in sensor_info.items():
+                if meta["label"] in col:
+                    color = meta.get("color", "black")
+                    if prop == "oxygen":
+                        z_order = 10  # ensure oxygen is on top
+                    break
+            ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8, color=color, zorder=z_order)
+
+        # Plot hypoxia line on both, label only once
+        ax.axhline(
+            y=3,
+            color='red',
+            linestyle='--',
+            linewidth=1,
+            label='Low Oxygen Threshold (3 ml/l)' if not added_hypoxia_label else None
+        )
+        added_hypoxia_label = True  # Prevent further labels
+                    
+        # Time range for title and axis
         start_time = plot_df.index[0]
         end_time = plot_df.index[-1]
 
-        # Labels and title
-        ax[i].set_xlabel("Time", labelpad=12)
-        ax[i].set_ylabel("Sensor Value", labelpad=12)
-        ax[i].set_title(f"{title}{': Denoised' if i % 2 !=0 else''}\n", y=1.0, pad=8)
+        # Title and labels
+        ax.set_title(f"{place[locationCode]["name"]}{titles[i]}")
+        ax.set_ylabel("Sensor Value", labelpad= 12)
+        ax.set_xlabel("Time", labelpad= 12)
+        ax.grid(True, linestyle="--", linewidth=0.5)
+        ax.legend(loc="upper right")
 
-        # Set axis limits
-        ax[i].margins(x=0.01, y=0.01)
-        #ax[i].set_ylim(top=ymax if ymax else None)
-        #ax.set_xlim(left=start_time, right=end_time)
+        # Y-axis tick spacing
+        # ymin, ymax = ax.get_ylim()
+        # y_range = ymax - ymin
+        # ytick_step = round_data_tick_size(y_range / 10)
+        # ax.yaxis.set_major_locator(MultipleLocator(ytick_step))
 
-        # Set tick frequencies
-        ymin, ymax = ax[i].get_ylim()
-        y_range = ymax - ymin
-        raw_ytick_step = y_range / 5  # target ~5 major ticks
-        ytick_step = round_data_tick_size(raw_ytick_step)
-        ax[i].yaxis.set_major_locator(MultipleLocator(ytick_step))
+        # X-axis tick spacing (days)
+        x_range_days = (end_time - start_time).days
+        xtick_step = max(1, round_data_tick_size(x_range_days / 6))
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
 
-        x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)    
-        raw_xtick_step = x_range / 5 # Target: ~5 x-axis ticks
-        xtick_step = round_data_tick_size(raw_xtick_step)
-        ax[i].xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
-        ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+    # X-axis label on bottom plot only
+    axes[-1].set_xlabel("Date")
 
-        # Grid and legend
-        ax[i].grid(True, which="major", linestyle="--", linewidth=0.5)
-        ax[i].legend(title="Sensors", loc="upper right")
+    # Figure title
+    fig.suptitle(f"{place[locationCode]["name"]}\n {start_time.strftime('%b %d, %Y')} to {end_time.strftime('%b %d, %Y')}",
+                 fontweight='bold', 
+                 x=0.51,
+                 y=0.98)
 
-    # Add overall title
-    fig.suptitle(f"{title}\n"
-                 f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-                 fontweight='bold',
-                 y=0.98,
-                 x=0.51
-                 )
-
-    # Adjust layout to make space for subtitle
+    plt.tight_layout()
     plt.subplots_adjust(top=0.92, hspace=0.2)
     plt.show()
 
-def plot_all_norm_and_scale(df: pd.DataFrame, ymax: float, title: str = "Sensor Readings Over Time") -> None:
+def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: float = None) -> None:
     """
-    Plots each numeric sensor column in the DataFrame against time, with line priority and unit-labeled legend entries, then subplots the same data but normalized.
+    Plots raw, smoothed, and normalized+smoothed sensor values over time in 3 vertically stacked subplots.
 
     Parameters:
-        df (pd.DataFrame): DataFrame with 'timestamp' and sensor columns.
-        title (str): Title of the plot.
-        ymax (float): Optional maximum y-axis value. Default shows all values.
-
-    Returns:
-        None
+        df (pd.DataFrame): DataFrame indexed by datetime with sensor value columns.
+        ymax (float): Optional upper Y-axis limit.
+        title (str): Plot title.
     """
-    # Set style for plots
-    # sns.set_style("darkgrid")
+    copy_df = df.copy()
+    smoothed_df = smooth_df(copy_df)
 
-    renamed_df = rename_columns_with_units(df) # rename sensor columns to include units
-    normalized_df = smooth_df(renamed_df) # rollowing window mean filter for outliers
+    dfs = [copy_df, smoothed_df, smoothed_df]
+    subtitles = ["", " - Smoothed", " - Smoothed (Zoomed In? )"]
 
-    dfs = [renamed_df, normalized_df]
 
-    # Set 'timestamp' as index (no longer a column)
-    renamed_df = renamed_df.set_index("timestamp")
-    normalized_df = normalized_df.set_index("timestamp")
-
-    # Define figure and axes for subplots
     fig, ax = plt.subplots(figsize=(16, 22), nrows=3, ncols=1)
 
-    # Get sensor columns
-    sensor_cols = renamed_df.columns.tolist()
-    
-    # TODO: unhard code this
-    for i, df in enumerate(dfs):
+    sensor_cols = df.columns.tolist()
 
+    for i, df_i in enumerate(dfs):
+        added_hypoxia_label = False
         for col in sensor_cols:
-            # NOTE: plot with priority 
-            base = col.lower().split(" (")[0] # Get base property name (remove units in parentheses)
-            z_order = get_priority_zorder(base)
-            ax[i].plot(renamed_df.index, df[col], label=col, linewidth=1, zorder=z_order)
 
-        # Isolate times for title
-        start_time = df["timestamp"].iloc[0]
-        end_time = df["timestamp"].iloc[-1]
+        # Dynamically match the label to a propertyCode
+            color = "black"  # default color
+            z_order = 1  # default base layer
+
+            for prop, meta in sensor_info.items():
+                if meta["label"] in col:
+                    color = meta.get("color", "black")
+                    if prop == "oxygen":
+                        z_order = 10  # ensure oxygen is on top
+                    break
+            ax[i].plot(df_i.index, df_i[col], label=col, linewidth=1, color=color, zorder=z_order)
+
+        # Plot hypoxia line on both, label only once
+        ax[i].axhline(
+            y=3,
+            color='red',
+            linestyle='--',
+            linewidth=1,
+            label='Low Oxygen Threshold (3 ml/l)' if not added_hypoxia_label else None
+        )
+        added_hypoxia_label = True  # Prevent further labels
+            
+        # Time range
+        start_time = df_i.index[0]
+        end_time = df_i.index[-1]
 
         # Labels and title
-        ax[i].set_xlabel("Time", labelpad=12)
-        ax[i].set_ylabel("Sensor Value", labelpad=12)
-        ax[i].set_title(f"{title}{': Denoised' if i == 1 else''}\n", y=1.0, pad=8)
+        ax[i].set_title(f"{place[locationCode]["name"]} {subtitles[i]}", y=1.0, pad=8)
+        ax[i].set_xlabel("Time", labelpad=13)
+        ax[i].set_ylabel("Sensor Value", labelpad=13)
 
-        # Set axis limits
+        # Axis limits
         ax[i].margins(x=0.01, y=0.01)
-        #ax[i].set_ylim(top=ymax if ymax else None)
-        #ax.set_xlim(left=start_time, right=end_time)
+        if ymax and i == 2:  # Only apply ymax to the third (clipped) plot
+            ax[i].set_ylim(top=ymax)
 
-        # Set tick frequencies
-        ymin, ymax_actual = ax[i].get_ylim()
-        y_range = ymax - ymin if ymax else ymax_actual - ymin
-        raw_ytick_step = y_range / 5  # target ~5 major ticks
-        ytick_step = round_data_tick_size(raw_ytick_step)
-        ax[i].yaxis.set_major_locator(MultipleLocator(ytick_step))
 
-        x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)    
-        raw_xtick_step = x_range / 5 # Target: ~5 x-axis ticks
-        xtick_step = round_data_tick_size(raw_xtick_step)
+        # Y-axis ticks
+        # ymin, ymax_actual = ax[i].get_ylim()
+        # y_range = (ymax or ymax_actual) - ymin
+        # ytick_step = round_data_tick_size(y_range / 6)
+        # ax[i].yaxis.set_major_locator(MultipleLocator(ytick_step))
+
+        # X-axis ticks
+        x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)
+        xtick_step = max(1, round_data_tick_size(x_range / 6))
         ax[i].xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
-        ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+        ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
 
         # Grid and legend
-        ax[i].grid(True, which="major", linestyle="--", linewidth=0.5)
-        ax[i].legend(title="Sensors", loc="upper right")
-
-
-    # Plot scaled and denoised
-    for col in sensor_cols:
-        # NOTE: plot with priority 
-        base = col.lower().split(" (")[0] # Get base property name (remove units in parentheses)
-        z_order = get_priority_zorder(base)
-        ax[2].plot(renamed_df.index, normalized_df[col], label=col, linewidth=1, zorder=z_order)
-
-    # Isolate times for title
-    start_time = df["timestamp"].iloc[0]
-    end_time = df["timestamp"].iloc[-1]
-
-    # Labels and title
-    ax[2].set_xlabel("Time", labelpad=12)
-    ax[2].set_ylabel("Sensor Value", labelpad=12)
-    ax[2].set_title(f"{title}: Denoised and Scaled\n", y=1.0, pad=8)
-
-    # Set axis limits
-    ax[2].margins(x=0.01, y=0.01)
-    ax[2].set_ylim(top=ymax)
-    #ax.set_xlim(left=start_time, right=end_time)
-
-    # Set tick frequencies
-    ymin, ymax_actual = ax[i].get_ylim()
-    y_range = ymax - ymin if ymax else ymax_actual - ymin
-    raw_ytick_step = y_range / 5  # target ~5 major ticks
-    ytick_step = round_data_tick_size(raw_ytick_step)
-    ax[2].yaxis.set_major_locator(MultipleLocator(ytick_step))
-
-    x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)    
-    raw_xtick_step = x_range / 5 # Target: ~5 x-axis ticks
-    xtick_step = round_data_tick_size(raw_xtick_step)
-    ax[2].xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
-    ax[2].xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
-
-    # Grid and legend
-    ax[2].grid(True, which="major", linestyle="--", linewidth=0.5)
-    ax[2].legend(title="Sensors", loc="upper right")
-
+        ax[i].grid(True, linestyle="--", linewidth=0.5)
+        ax[i].legend(loc="upper right", title="Sensors")
 
     # Add overall title
-    fig.suptitle(f"{title}\n"
-                 f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-                 fontweight='bold',
-                 y=0.98,
-                 x=0.51
-                 )
+    fig.suptitle(f"{place[locationCode]["name"]}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+                 fontweight='bold', 
+                 x=0.51,
+                 y=0.98)
 
-    # Adjust layout to make space for subtitle
-    plt.subplots_adjust(top=0.93, hspace=0.3)
+    # Adjust layout
+    plt.subplots_adjust(top=0.94, hspace=0.2)
     plt.show()
-
+   
 
 def subplot_all_with_oxygen(df: pd.DataFrame, title: str = "Oxygen vs", normalized: bool = False) -> None:
     """
@@ -558,14 +503,13 @@ def subplot_all_with_oxygen(df: pd.DataFrame, title: str = "Oxygen vs", normaliz
     Returns:
         None
     """
-    renamed_df = rename_columns_with_units(df) # rename columns with units
-    plot_df = smooth_df(renamed_df) if normalized else renamed_df
 
-    # Set 'timestamp' as index
-    plot_df = plot_df.set_index("timestamp")
+    copy_df = df.copy()
+    plot_df = smooth_df(copy_df) if normalized else copy_df # if selected normalized then do so
 
     # Identify the oxygen column
     oxygen_col = [col for col in plot_df.columns if "oxygen" in col.lower()]
+
     if not oxygen_col:
         raise ValueError("No column containing 'oxygen' found.")
     oxygen_col = oxygen_col[0]
@@ -579,6 +523,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, title: str = "Oxygen vs", normaliz
 
     # Plot each sensor vs oxygen
     for i, sensor_col in enumerate(sensor_cols):
+
         ax = axs[i]
         ax2 = ax.twinx()
 
