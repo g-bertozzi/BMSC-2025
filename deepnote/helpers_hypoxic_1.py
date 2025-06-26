@@ -47,7 +47,7 @@ sensor_info = {
     "turbidityntu": {
         "label": "Turbidity (NTU)",
         "deviceCategoryCode": "FLNTU",
-        "color": "slategray",
+        "color": "saddlebrown",
     },
     "conductivity": {
         "label": "Conductivity (S/m)",
@@ -117,7 +117,7 @@ def fetch_property_result(start: str, end: str, locationCode: str, propertyCode:
         if locationCode == "FGPD":
             params["locationCode"] = "FGPD.O2"
 
-    #if updates: print(f"API Request: getScalarData{params}") # NOTE: for clarity 
+    if updates: print(f"API Request: getScalarData{params}") # NOTE: for clarity 
 
     result = my_onc.getScalardata(params)
     return result
@@ -155,7 +155,7 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
             result = fetch_property_result(start, end, locationCode, prop, updates, resample)
 
             df = result_to_dataframe(result, prop)
-            if updates: print(f"Creating data frame for {prop}.\nPreview: {df.columns.tolist()}") # NOTE: for clarity
+            #if updates: print(f"Creating data frame for {prop}.\nPreview: {df.columns.tolist()}") # NOTE: for clarity
             if df is not None:
                 dfs.append(df)
         except Exception as e:
@@ -230,9 +230,9 @@ def round_data_tick_size(value):
     else:
         return 10 * magnitude
 
-# TODO: integrate ox vx all
-# TODO: fix norm and scale subplot y axis
+# TODO: get cast and mount functions
 
+# TODO: make consistent x axis labels for limits
 def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, normalized: bool = False) -> None:
     """
     Plots each numeric sensor column in the DataFrame against time, 
@@ -488,85 +488,83 @@ def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: flo
     # Adjust layout
     plt.subplots_adjust(top=0.94, hspace=0.2)
     plt.show()
-   
 
-def subplot_all_with_oxygen(df: pd.DataFrame, title: str = "Oxygen vs", normalized: bool = False) -> None:
+def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: bool = False) -> None:
     """
     Creates a series of subplots where each subplot shows oxygen vs another sensor over time.
-
-    Parameters:
-        df (pd.DataFrame): DataFrame with 'timestamp' and multiple sensor columns.
-        title_prefix (str): Prefix for each subplot's title.
-        ytick_freq (float): Frequency of y-ticks on the right axis (sensor).
-        oxygen_ytick_freq (float): Frequency of y-ticks on the left axis (oxygen).
-
-    Returns:
-        None
+    Applies consistent colors and a hypoxia threshold line.
     """
-
     copy_df = df.copy()
-    plot_df = smooth_df(copy_df) if normalized else copy_df # if selected normalized then do so
+    plot_df = smooth_df(copy_df) if normalized else copy_df
 
-    # Identify the oxygen column
+    # Identify oxygen column
     oxygen_col = [col for col in plot_df.columns if "oxygen" in col.lower()]
-
     if not oxygen_col:
         raise ValueError("No column containing 'oxygen' found.")
     oxygen_col = oxygen_col[0]
 
-    # Get list of all other sensor columns
+    # All other columns
     sensor_cols = [col for col in plot_df.columns if col != oxygen_col]
-
-    # Create subplots
     num_sensors = len(sensor_cols)
-    fig, axs = plt.subplots(num_sensors, 1, figsize=(16, 3 * num_sensors))
 
-    # Plot each sensor vs oxygen
+    fig, axs = plt.subplots(num_sensors, 1, figsize=(16, 3.2 * num_sensors))
+
+    if num_sensors == 1:
+        axs = [axs]  # ensure it's always iterable
+
     for i, sensor_col in enumerate(sensor_cols):
-
         ax = axs[i]
         ax2 = ax.twinx()
 
-        ax.plot(plot_df.index, plot_df[oxygen_col], color='blue', label='Oxygen', linewidth=1)
-        ax.set_ylabel('Oxygen ()', color='blue', labelpad=12)
-        ax.tick_params(axis='y', labelcolor='blue')
+        # Oxygen color and label
+        oxygen_meta = next((meta for meta in sensor_info.values() if meta["label"] in oxygen_col), {})
+        oxygen_color = "royalblue"
+        oxygen_label = oxygen_meta.get("label", "Oxygen")
 
-        ax2.plot(plot_df.index, plot_df[sensor_col], color='red', label=sensor_col, linewidth=1)
-        ax2.set_ylabel(sensor_col, color='red', labelpad=12)
-        ax2.tick_params(axis='y', labelcolor='red')
+        # Sensor color and label
+        sensor_meta = next((meta for meta in sensor_info.values() if meta["label"] in sensor_col), {})
+        sensor_color = sensor_meta.get("color", "red")
+        sensor_label = sensor_meta.get("label", sensor_col)
 
-        ax.set_title(f"Oxygen (ml/l) vs {sensor_col}", y=1.0, pad=10)
+        # Plot both
+        ax.plot(plot_df.index, plot_df[oxygen_col], color=oxygen_color, label=oxygen_label, linewidth=1, zorder=10)
+        ax.set_ylabel(oxygen_label, color=oxygen_color, labelpad=12)
+        ax.tick_params(axis='y', labelcolor=oxygen_color)
+
+        ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, label=sensor_label, linewidth=1, zorder=1)
+        ax2.set_ylabel(sensor_label, color=sensor_color, labelpad=12)
+        ax2.tick_params(axis='y', labelcolor=sensor_color)
+
+        # Hypoxia threshold line
+        ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label="Low Oxygen Threshold (3 ml/l)")
+
+        # Title per subplot
+        ax.set_title(f"{oxygen_label} vs {sensor_label}", y=1.0, pad=10)
         ax.grid(True, linestyle='--', linewidth=0.5)
 
-    # Isolate for title etc.
-    start_time = df["timestamp"].iloc[0]
-    end_time = df["timestamp"].iloc[-1]
+    # Time range
+    start_time = df.index[0]
+    end_time = df.index[-1]
 
-    # Shared x-axis label
+    # Shared x-label
     axs[-1].set_xlabel("Timestamp", labelpad=15)
 
-    # Set tick formatting to all subplots
+    # X-axis formatting
     x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)
-    raw_xtick_step = x_range / 5
-    xtick_step = round_data_tick_size(raw_xtick_step)
-    date_format = mdates.DateFormatter('%b %d, %Y')
-    date_locator = mdates.DayLocator(interval=xtick_step)
+    xtick_step = round_data_tick_size(x_range / 5)
+    locator = mdates.DayLocator(interval=xtick_step)
+    formatter = mdates.DateFormatter('%b %d, %Y')
 
     for ax in axs:
-        ax.xaxis.set_major_locator(date_locator)
-        ax.xaxis.set_major_formatter(date_format)
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
 
-    # Set axis limits and margin
-    ax.margins(x=0.05,y=0.01)
-
-    # Add overall title
-    fig.suptitle(f"{title}{' (Denoised)' if normalized else''}\n"
+    # Layout and title
+    fig.suptitle(f"{place[locationCode]["name"]}{' (Smoothed)' if normalized else ''}\n"
                  f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-                 fontweight='bold',
-                 y=0.98,
-                 x=0.51
-                 )
-                 
-    # Adjust layout to make space for subtitle
-    plt.subplots_adjust(top=0.92, hspace=0.4)
+                 fontweight='bold', 
+                 y=0.98, 
+                 x=0.51)
+
+    plt.subplots_adjust(top=0.89, hspace=0.4)
     plt.show()
