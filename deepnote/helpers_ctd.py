@@ -52,7 +52,7 @@ NOTE goals:
 - longer term plot of mount data, with marks for where casts are
 
 """
-def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: str, resample: int = None) -> pd.DataFrame:
+def get_property(start: str, end: str, locationCode: str, deviceCategoryCode: str, sensorCategoryCodes: str, resample: int = None) -> pd.DataFrame:
     """
     Fetches scalar data for CTDs given a given location, sensor properties and time window. 
     Returns a merged DataFrame with timestamps and sensor values.
@@ -73,7 +73,7 @@ def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: s
     if resample:
         params = {
         "locationCode": locationCode,
-        "deviceCategoryCode": "CTD",
+        "deviceCategoryCode": deviceCategoryCode,
         "sensorCategoryCodes": sensorCategoryCodes,
         "dateFrom": start,
         "dateTo" : end,
@@ -91,8 +91,14 @@ def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: s
         "dateTo" : end
         }
 
+    print(f"API request: getScalarData({params})") # NOTE: debug
+
     # JSON response from ONC
     result = my_onc.getScalardata(params)
+    
+     # NOTE: debug
+    sensorData_df = pd.DataFrame(result['sensorData']) 
+    print(f"Sensor data: {sensorData_df}")
 
     # error handle if there is no data returned
     if not result or "sensorData" not in result or result["sensorData"] is None or len(result["sensorData"]) == 0:
@@ -160,6 +166,7 @@ def detect_cast_intervals(df: pd.DataFrame, gap_threshold_minutes: int = 10) -> 
     ]
 
     return intervals
+
 # TODO: make deep just be within say 10m of max depth?
 def detect_deep_intervals(df: pd.DataFrame, depth_threshold: int, gap_threshold_seconds: int = 60) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
     """
@@ -402,7 +409,7 @@ def subplot_cast_and_mount_temp_by_place(dataframes: list[pd.DataFrame], locatio
 
             # Label local temp mins and maxes
             ax.text(
-                0.04, 0.11 if num_casts == 2 else 0.15, f"Min: {local_min:.3f}°C\nMax: {local_max:.3f}°C", # NOTE: hardcoded positions for specific casts
+                0.04, 0.11 if num_casts == 2 else 0.15, f"Max: {local_max:.3f}°C\nMin: {local_min:.3f}°C", # NOTE: hardcoded positions for specific casts
                              transform=ax.transAxes,
                 fontsize=8,
                 verticalalignment='top',
