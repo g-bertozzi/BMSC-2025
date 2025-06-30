@@ -167,7 +167,7 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
     merged_df = reduce(lambda left, right: pd.merge(left, right, on="Time", how="outer"), dfs)
     merged_df.sort_index(inplace=True)
 
-    if updates: print(f"Combining data frames for {propertyCodes}") # NOTE: for clarity TODO: make actually df preview
+    if updates: print(f"Generated combined data frame for {propertyCodes} at {locationCode}.") # NOTE: for clarity TODO: make actually df preview
 
     return merged_df
 
@@ -283,8 +283,8 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
     # Labels and title
     ax.set_xlabel("Time", labelpad= 12)
     ax.set_ylabel("Sensor Value", labelpad=12)
-    ax.set_title(f"{place[locationCode]["name"]}{' (Denoised)' if normalized else''}\n"
-            f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+    ax.set_title(f"{place[locationCode]['name']}{' (Denoised)' if normalized else ''}\n"
+             f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
             fontweight='bold',
             pad=15
             )
@@ -336,8 +336,6 @@ def plot_dataframe_norm(df: pd.DataFrame, locationCode: str) -> None:
 
     fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(16, 12))
 
-   
-
     for i, ax in enumerate(axes):
         added_hypoxia_label = False
         plot_df = dfs[i]
@@ -371,7 +369,7 @@ def plot_dataframe_norm(df: pd.DataFrame, locationCode: str) -> None:
         end_time = plot_df.index[-1]
 
         # Title and labels
-        ax.set_title(f"{place[locationCode]["name"]}{titles[i]}")
+        ax.set_title(f"{place[locationCode]['name']}{titles[i]}")
         ax.set_ylabel("Sensor Value", labelpad= 12)
         ax.set_xlabel("Time", labelpad= 12)
         ax.grid(True, linestyle="--", linewidth=0.5)
@@ -387,13 +385,13 @@ def plot_dataframe_norm(df: pd.DataFrame, locationCode: str) -> None:
         x_range_days = (end_time - start_time).days
         xtick_step = max(1, round_data_tick_size(x_range_days / 6))
         ax.xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
     # X-axis label on bottom plot only
     axes[-1].set_xlabel("Date")
 
     # Figure title
-    fig.suptitle(f"{place[locationCode]["name"]}\n {start_time.strftime('%b %d, %Y')} to {end_time.strftime('%b %d, %Y')}",
+    fig.suptitle(f"{place[locationCode]['name']}\n {start_time.strftime('%b %d, %Y')} to {end_time.strftime('%b %d, %Y')}",
                  fontweight='bold', 
                  x=0.51,
                  y=0.98)
@@ -453,7 +451,7 @@ def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: flo
         end_time = df_i.index[-1]
 
         # Labels and title
-        ax[i].set_title(f"{place[locationCode]["name"]} {subtitles[i]}", y=1.0, pad=8)
+        ax[i].set_title(f"{place[locationCode]['name']} {subtitles[i]}", y=1.0, pad=8)
         ax[i].set_xlabel("Time", labelpad=13)
         ax[i].set_ylabel("Sensor Value", labelpad=13)
 
@@ -473,14 +471,14 @@ def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: flo
         x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)
         xtick_step = max(1, round_data_tick_size(x_range / 6))
         ax[i].xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
-        ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
+        ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
         # Grid and legend
         ax[i].grid(True, linestyle="--", linewidth=0.5)
         ax[i].legend(loc="upper right", title="Sensors")
 
     # Add overall title
-    fig.suptitle(f"{place[locationCode]["name"]}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+    fig.suptitle(f"{place[locationCode]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
                  fontweight='bold', 
                  x=0.51,
                  y=0.98)
@@ -527,11 +525,11 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         sensor_label = sensor_meta.get("label", sensor_col)
 
         # Plot both
-        ax.plot(plot_df.index, plot_df[oxygen_col], color=oxygen_color, label=oxygen_label, linewidth=1, zorder=10)
+        ax.plot(plot_df.index, plot_df[oxygen_col], color=oxygen_color, label=oxygen_label, linewidth=0.8, zorder=10)
         ax.set_ylabel(oxygen_label, color=oxygen_color, labelpad=12)
         ax.tick_params(axis='y', labelcolor=oxygen_color)
 
-        ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, label=sensor_label, linewidth=1, zorder=1)
+        ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, label=sensor_label, linewidth=0.8, zorder=1)
         ax2.set_ylabel(sensor_label, color=sensor_color, labelpad=12)
         ax2.tick_params(axis='y', labelcolor=sensor_color)
 
@@ -560,7 +558,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         ax.xaxis.set_major_formatter(formatter)
 
     # Layout and title
-    fig.suptitle(f"{place[locationCode]["name"]}{' (Smoothed)' if normalized else ''}\n"
+    fig.suptitle(f"{place[locationCode]['name']}{' (Smoothed)' if normalized else ''}\n"
                  f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
                  fontweight='bold', 
                  y=0.98, 

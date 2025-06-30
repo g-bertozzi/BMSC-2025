@@ -68,7 +68,7 @@ def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: s
         pd.DataFrame: DataFrame containing merged sensor values with a timestamp index.
                     schema: timestamp: datetime obj, {prop}: int or float
     """
-    print(f"Requesting CTD data at {locationCode} from {start} to {end}") # NOTE: debugging
+    # print(f"Requesting CTD data at {locationCode} from {start} to {end}") # NOTE: debugging
 
     if resample:
         params = {
@@ -123,7 +123,7 @@ def get_property(start: str, end: str, locationCode: str, sensorCategoryCodes: s
     start_time = df_merged["timestamp"].iloc[0]
     end_time = df_merged["timestamp"].iloc[-1]
 
-    print(f"Dataframe start: {start_time} Dataframe end: {end_time}") # NOTE: debugging
+    # print(f"Dataframe start: {start_time} Dataframe end: {end_time}") # NOTE: debugging
 
     return df_merged
 

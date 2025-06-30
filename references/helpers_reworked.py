@@ -63,14 +63,23 @@ Useful for naming dataframe columns with clean, capitlzed names and units.
 SCHEMA: deviceCategoryCode : [{propertyCode, name (unit)}]
 """
 device_info = {
-    "OXYSENSOR": [{"propertyCode": "oxygen", "name": "Oxygen (ml/l)", "sensorCategoryCode": "oxygen_corrected"}],
-    "radiometer": [{"propertyCode": "parphotonbased", "name": "PAR (µmol/m²/s)"}],
-    "FLNTU": [{"propertyCode": "chlorophyll", "name": "Chlorophyll (µg/l)"}, 
-               {"propertyCode": "turbidityntu", "name": "Turbidity (NTU)"}],
-    "CTD": [{"propertyCode": "conductivity", "name": "Conductivity (S/m)"}, 
-            {"propertyCode": "seawatertemperature", "name": "Temperature (°C)"},
-            {"propertyCode": "density", "name": "Density (kg/m3)"}],
+    "OXYSENSOR": {
+        "oxygen": {"label": "Oxygen (ml/l)", "unit": "ml/l"}
+    },
+    "radiometer": {
+        "parphotonbased": {"label": "PAR (µmol/m²/s)", "unit": "µmol/m²/s"}
+    },
+    "FLNTU": {
+        "chlorophyll": {"label": "Chlorophyll (µg/l)", "unit": "µg/l"},
+        "turbidityntu": {"label": "Turbidity (NTU)", "unit": "NTU"}
+    },
+    "CTD": {
+        "conductivity": {"label": "Conductivity (S/m)", "unit": "S/m"},
+        "seawatertemperature": {"label": "Temperature (°C)", "unit": "°C"},
+        "density": {"label": "Density (kg/m3)", "unit": "kg/m3"}
     }
+}
+
 
 # FETCHING DATA
 def get_device_parameters(start: str, end: str, locationCode: str, deviceCategoryCode: str, resample: int = None) -> dict:
@@ -92,7 +101,8 @@ def get_device_parameters(start: str, end: str, locationCode: str, deviceCategor
     """
 
     # Join all propertyCodes into one comma-separated string
-    propertyCode = ",".join([prop["propertyCode"] for prop in device_info[deviceCategoryCode]])
+    propertyCode = ",".join(device_info[deviceCategoryCode].keys())
+
 
     if resample: 
         # If OXYSENSOR, must use sensorCategoryCodes instead of propertyCode
@@ -183,12 +193,12 @@ def get_device_dataframe(start: str, end: str, locationCode: str, result: dict) 
         # Default to raw property name if no match
         column_title = prop
         
-        # Match the propertyCode to a human-readable name from device_info (with unit)
-        for devCat in device_info:  # loop through device categories
-            for dev in device_info[devCat]:  # loop through sensor definitions
-                if dev["propertyCode"] in prop or prop in dev["propertyCode"]:
-                    column_title = dev["name"]  # e.g., "Temperature (°C)"
-                    break
+        # Search for the label in the new device_info structure
+        for dev_cat, props in device_info.items():
+            if prop in props:
+                column_title = props[prop]["label"]
+                break
+
 
         # Populate dataframe with induvidual sensor property
         df = pd.DataFrame({
@@ -302,7 +312,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, columns: str = None, smo
     ax.set_xlabel("Time", labelpad=13)
     ax.set_ylabel("Sensor Value", labelpad=13)
 
-    ax.set_title(f"{place[locationCode]["name"]} -  {plot_title}\n"
+    ax.set_title(f"{place[locationCode]['name']} -  {plot_title}\n"
                  f"{start_time} to {end_time}", 
                  fontweight="bold", 
                  pad=14,)

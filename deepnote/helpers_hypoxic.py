@@ -28,41 +28,6 @@ sensor_info = pd.DataFrame([
     {"propertyCode": "turbidityntu", "name": "Turbidity", "unit": "NTU", "deviceCategoryCode": "FLNTU"},
 ])
 
-def find_properties_by_location(locationCode: str):
-    """
-    Retrieves and prints a list of all sensor properties available at a given ONC location.
-    For each property, includes its display name, property code, and whether it has associated device data.
-
-    Parameters:
-        locationCode (str): The ONC location code to query (e.g., "FGPPN").
-
-    Returns:
-        None: Prints a DataFrame of available properties to stdout.
-    """
-    params = {
-        "locationCode": locationCode,
-        #"deviceCategoryCode" : "CTD" 
-    }
-
-    result = my_onc.getProperties(params)
-    extracted = []
-
-    for entry in result:
-        # Defensive check: make sure these keys exist
-        name = entry.get("propertyName", "")
-        code = entry.get("propertyCode", "")
-        has_data = entry.get("hasDeviceData", False)
-
-        # Optionally: filter out properties that aren't actually measured
-        if name and code:
-            extracted.append({
-                "propertyName": name,
-                "propertyCode": code,
-                "hasDeviceData": has_data
-            })
-    
-    df = pd.DataFrame(extracted)
-    print(df)
 
 def get_dataframe(start: str, end: str, props: list[str]) -> list[pd.DataFrame]:
     """
