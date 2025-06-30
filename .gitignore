@@ -1,4 +1,11 @@
-.env
-.venv
-.DS_Store
+# Python environment and cache
+.venv/
+__pycache__/
 **/__pycache__/
+*.pyc
+
+# Local environment and config
+.env
+
+# macOS metadata
+.DS_Store
