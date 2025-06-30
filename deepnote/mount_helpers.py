@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import MultipleLocator
 
+from typing import List, Tuple
 from functools import reduce # used for dataframes
 
 import os
@@ -90,6 +91,18 @@ place = {
 def fetch_property_result(start: str, end: str, locationCode: str, propertyCode: str, updates: bool, resample: int = None) -> dict:
     """
     Makes ONC API call to get scalar data for a single propertyCode.
+
+    Inputs:
+        start (str): ISO 8601 UTC start timestamp (e.g., "2021-07-01T00:00:00Z")
+        end (str): ISO 8601 UTC end timestamp (e.g., "2021-07-02T00:00:00Z")
+        locationCode (str): ONC location code (e.g., "FGPPN")
+        propertyCode (str): ONC property code (e.g., "oxygen", "seawatertemperature")
+        updates (bool): If True, prints API call details for debugging
+        resample (int, optional): Resample period in seconds (e.g., 60 for 1-minute averages)
+
+    Output:
+        result (dict): JSON-like dictionary from ONC API containing the requested scalar data
+
     """
     device_cat = sensor_info[propertyCode]["deviceCategoryCode"]
 
@@ -124,7 +137,17 @@ def fetch_property_result(start: str, end: str, locationCode: str, propertyCode:
 
 def result_to_dataframe(result: dict, propertyCode: str) -> pd.DataFrame:
     """
-    Converts ONC result for a single propertyCode to a labeled, time-indexed DataFrame.
+    Converts API result for a single propertyCode to a labeled, time-indexed DataFrame.
+
+    Inputs:
+        result (dict): JSON-like response from ONC API for a single propertyCode.
+                       Expected to contain 'sensorData' with 'sampleTimes' and 'values'.
+        propertyCode (str): The ONC propertyCode used to fetch the data (e.g., "oxygen").
+
+    Output:
+        pd.DataFrame: A DataFrame indexed by timestamp with a single column for the specified property.
+                      Returns None if no data is found.
+
     """
 
     if not result or "sensorData" not in result or not result["sensorData"]:
@@ -147,6 +170,19 @@ def result_to_dataframe(result: dict, propertyCode: str) -> pd.DataFrame:
 def get_multi_property_dataframe(start: str, end: str, locationCode: str, propertyCodes: list[str], resample: int = None, updates: bool = False) -> pd.DataFrame:
     """
     Fetches, formats, and merges multiple properties into one time-indexed DataFrame.
+
+    Inputs:
+        start (str): Start datetime in ISO 8601 format (e.g., "2023-07-11T00:00:00.000Z").
+        end (str): End datetime in ISO 8601 format.
+        locationCode (str): ONC location code (e.g., "FGPPN").
+        propertyCodes (list[str]): List of ONC propertyCodes to fetch (e.g., ["oxygen", "temperature"]).
+        resample (int, optional): Resample period in seconds. If set, API will average data over this period.
+        updates (bool, optional): If True, prints status updates during execution.
+
+    Output:
+        pd.DataFrame: A time-indexed DataFrame with one column per property.
+                      Columns are labeled according to the `sensor_info` dictionary.
+                      Returns None if no data is retrieved.
     """
     dfs = []
 
@@ -208,7 +244,7 @@ def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def round_data_tick_size(value):
     """
-    Safely round a step size to a clean value: 1, 2, 5, or 10 × 10^n
+    Safely round a step size to a clean value: 1, 2, 5, or 10 x 10^n
     """
     import math
     if value <= 0:
@@ -565,4 +601,52 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
                  x=0.51)
 
     plt.subplots_adjust(top=0.89, hspace=0.4)
+    plt.show()
+
+def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None) -> None:
+    """
+    Subplots all properties in a data frame against time.
+    """
+    start_time = df.index[0]
+    end_time = df.index[-1]
+    sensor_cols = df.columns.to_list()
+
+    fig, axes = plt.subplots(figsize=(14, len(sensor_cols)*3.2), nrows=len(sensor_cols), ncols=1)
+    if len(sensor_cols) == 1:
+        axes = [axes]  # ensure iterable
+
+    for i, col in enumerate(sensor_cols):
+        color = "black"
+        z_order = 1
+        label = col
+
+        for prop, meta in sensor_info.items():
+            if meta["label"] in col:
+                color = meta.get("color", "black")
+                label = meta["label"]
+                # if prop == "oxygen":
+                #     z_order = 10
+                break
+
+        ax = axes[i]
+        ax.plot(df.index, df[col], color=color, label=label, zorder=z_order)
+
+        ax.set_title(f"{place[locationCode]['name']} - {label}")
+        ax.set_ylabel(label, labelpad=13)
+        ax.set_xlabel("Date", labelpad=13)
+        ax.grid(True, linestyle="--", alpha=0.6)
+        ax.legend()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+
+        if "oxygen" in col.lower():
+            ax.axhline(y=3, color='red', linestyle='--', label="Hypoxia Threshold")
+
+    fig.suptitle(
+        f"{place[locationCode]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+        fontweight='bold',
+        y=0.97,
+        x=0.51
+    )
+
+    plt.subplots_adjust(top=0.92, hspace=0.4)
     plt.show()
