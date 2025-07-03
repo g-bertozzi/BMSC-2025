@@ -314,7 +314,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
     # title = f"{locationCode}\n{start_time} to {end_time}"
 
     # NOTE: debug
-    print(f"start df: {start_time}, end: {end_time}")
+    # print(f"start df: {start_time}, end: {end_time}")
 
     # Labels and title
     ax.set_xlabel("Time", labelpad= 12)
@@ -611,13 +611,13 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
     end_time = df.index[-1]
     sensor_cols = df.columns.to_list()
 
-    fig, axes = plt.subplots(figsize=(14, len(sensor_cols)*3.2), nrows=len(sensor_cols), ncols=1)
+    fig, axes = plt.subplots(figsize=(14, len(sensor_cols)*4), nrows=len(sensor_cols), ncols=1)
     if len(sensor_cols) == 1:
         axes = [axes]  # ensure iterable
 
     for i, col in enumerate(sensor_cols):
         color = "black"
-        z_order = 1
+        z_order = 0.8
         label = col
 
         for prop, meta in sensor_info.items():
@@ -648,5 +648,5 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
         x=0.51
     )
 
-    plt.subplots_adjust(top=0.92, hspace=0.4)
+    plt.subplots_adjust(top=0.90, hspace=0.4)
     plt.show()
