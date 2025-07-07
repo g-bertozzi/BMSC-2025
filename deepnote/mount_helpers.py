@@ -62,32 +62,28 @@ sensor_info = {
     },
 }
 
-
-# TODO: make cast plot dunctions consider within 10m of mount depth to be "deep"
-"""
-Global metadata dictionary for each location - e.g. FGPD, FGPPN
-
-Useful for accessing name for titles, mount vs cast codes, mount depths, and range considered deep for casts.
-
-SCHEMA: locationCode: {name, mountCode, castCode, mountDepth, depthThreshold}
-"""
+# schema: locationCode: {name, mountCode, castCode, mountDepth, depthThreshold}
 place = {
     "FGPPN": {
         "name": "Folger Pinnacle",
         "mountCode": "FGPPN",
         "castCode":"CF341",
         "mountDepth": 23,
-        "depthThreshold": 20 # depth to be considered for deep section
+        # "depthThreshold": 20 # depth to be considered for deep section
     },
     "FGPD": {
         "name": "Folger Deep",
         "mountCode": "FGPD",
         "castCode": "CF340",
         "mountDepth": 90,
-        "depthThreshold": 85
+        # "depthThreshold": 85
     }
 }
 
+
+# API CALL FUNCTIONS
+
+# NOTE: consider changing column naming wiht units and all the functions reliant on column names with units
 def fetch_property_result(start: str, end: str, locationCode: str, propertyCode: str, updates: bool, resample: int = None) -> dict:
     """
     Makes ONC API call to get scalar data for a single propertyCode.
@@ -208,6 +204,7 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
     return merged_df
 
 
+# PROCESSING FUNCTIONS
 
 def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -226,7 +223,7 @@ def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
     z_thresh = 3.0  # Z-score threshold for outlier detection
 
     smoothed_df = df.copy()  # Work on a copy to preserve the original
-    numeric_cols = df.columns #[col for col in df.columns if col != "timestamp"] # Select numeric columns only TODO: confirm
+    numeric_cols = df.columns
 
     # Apply rolling smoothing and z-score filtering to each numeric column
     for col in numeric_cols:
@@ -266,9 +263,10 @@ def round_data_tick_size(value):
     else:
         return 10 * magnitude
 
-# TODO: get cast and mount functions
 
-# TODO: make consistent x axis labels for limits
+# PLOTTING FUNCTIONS
+
+# TODO: make consistent x axis labels for limits, make y axis start at 0
 def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, normalized: bool = False) -> None:
     """
     Plots each numeric sensor column in the DataFrame against time, 
@@ -327,7 +325,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
 
     # Set axis limits and margin
     ax.margins(x=0.01,y=0.01)
-    ax.set_ylim(top=ymax if ymax else None)
+    ax.set_ylim(bottom=0, top=ymax if ymax else None)
     #ax.set_xlim(left=start_time, right=end_time)
 
     # --- Y-axis ticks ---
@@ -352,6 +350,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
     plt.tight_layout()
     plt.show()
 
+# TODO: remove smoothing - make function to subplot raw plot then zoomed in plot?v
 def plot_dataframe_norm(df: pd.DataFrame, locationCode: str) -> None:
     """
     Plots each sensor column in the DataFrame twice: raw and smoothed (normalized),
@@ -493,6 +492,7 @@ def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: flo
 
         # Axis limits
         ax[i].margins(x=0.01, y=0.01)
+        ax[i].set_ylim(bottom=0)
         if ymax and i == 2:  # Only apply ymax to the third (clipped) plot
             ax[i].set_ylim(top=ymax)
 
@@ -523,6 +523,7 @@ def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: flo
     plt.subplots_adjust(top=0.94, hspace=0.2)
     plt.show()
 
+# TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
 def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: bool = False) -> None:
     """
     Creates a series of subplots where each subplot shows oxygen vs another sensor over time.
@@ -560,17 +561,34 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         sensor_color = sensor_meta.get("color", "red")
         sensor_label = sensor_meta.get("label", sensor_col)
 
-        # Plot both
+        # Plot oxygen
         ax.plot(plot_df.index, plot_df[oxygen_col], color=oxygen_color, label=oxygen_label, linewidth=0.8, zorder=10)
         ax.set_ylabel(oxygen_label, color=oxygen_color, labelpad=12)
         ax.tick_params(axis='y', labelcolor=oxygen_color)
+        ax.set_ylim(bottom=0) # Ensure oxygen starts at 0
 
+        # Plot sensor
         ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, label=sensor_label, linewidth=0.8, zorder=1)
         ax2.set_ylabel(sensor_label, color=sensor_color, labelpad=12)
         ax2.tick_params(axis='y', labelcolor=sensor_color)
 
+       # Align y=0 if other sensor values are low
+        if plot_df[sensor_col].min() <= 1:
+            ax2.set_ylim(bottom=0)
+        
+
+        # TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
+        from matplotlib.ticker import MaxNLocator
+
+        # Get number of ticks on the left (oxygen) y-axis
+        num_oxy_ticks = len(ax.get_yticks())
+
+        # Force right y-axis (sensor) to use same number of ticks
+        ax2.yaxis.set_major_locator(MaxNLocator(nbins=num_oxy_ticks, prune=None))
+
+        # TODO: if you want line then add legend
         # Hypoxia threshold line
-        ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label="Low Oxygen Threshold (3 ml/l)")
+        # ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label="Low Oxygen Threshold (3 ml/l)")
 
         # Title per subplot
         ax.set_title(f"{oxygen_label} vs {sensor_label}", y=1.0, pad=10)
@@ -584,14 +602,19 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
     axs[-1].set_xlabel("Timestamp", labelpad=15)
 
     # X-axis formatting
-    x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)
-    xtick_step = round_data_tick_size(x_range / 5)
-    locator = mdates.DayLocator(interval=xtick_step)
-    formatter = mdates.DateFormatter('%b %d, %Y')
+
+    # Compute dynamic padding (e.g. 3% of full time range)
+    time_range = end_time - start_time
+    padding = time_range * 0.03  # 3% padding on each side
+    ax.set_xlim(start_time - padding, end_time + padding) # Make sure all axes span same range
+
+    locator = mdates.AutoDateLocator(minticks=6, maxticks=6)
+    locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months
 
     for ax in axs:
         ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(formatter)
+        # ax.xaxis.set_major_formatter(formatter)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
     # Layout and title
     fig.suptitle(f"{place[locationCode]['name']}{' (Smoothed)' if normalized else ''}\n"
@@ -603,6 +626,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
     plt.subplots_adjust(top=0.89, hspace=0.4)
     plt.show()
 
+# NOTE: this is set for x axis ticks every two months
 def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None) -> None:
     """
     Subplots all properties in a data frame against time.
@@ -611,7 +635,7 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
     end_time = df.index[-1]
     sensor_cols = df.columns.to_list()
 
-    fig, axes = plt.subplots(figsize=(14, len(sensor_cols)*4), nrows=len(sensor_cols), ncols=1)
+    fig, axes = plt.subplots(figsize=(16, len(sensor_cols)*4), nrows=len(sensor_cols), ncols=1)
     if len(sensor_cols) == 1:
         axes = [axes]  # ensure iterable
 
@@ -636,10 +660,30 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
         ax.set_xlabel("Date", labelpad=13)
         ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend()
+
+        # Set consistent x-ticks across all subplots
+
+        # Compute dynamic padding (e.g. 3% of full time range)
+        time_range = end_time - start_time
+        padding = time_range * 0.03  # 3% padding on each side
+        ax.set_xlim(start_time - padding, end_time + padding) # Make sure all axes span same range
+
+        locator = mdates.AutoDateLocator(minticks=6, maxticks=6)
+        locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months
+
+        ax.xaxis.set_major_locator(locator)
+
+
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+        
 
         if "oxygen" in col.lower():
             ax.axhline(y=3, color='red', linestyle='--', label="Hypoxia Threshold")
+
+    # match x-ticks across all subplots
+    shared_xticks = axes[0].get_xticks()
+    for ax in axes[1:]:
+        ax.set_xticks(shared_xticks)
 
     fig.suptitle(
         f"{place[locationCode]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
@@ -650,3 +694,6 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
 
     plt.subplots_adjust(top=0.90, hspace=0.4)
     plt.show()
+
+# TODO: make fucntion that will do twin y axis for parameters with greater magnitudes 
+# TODO: make function that will subplot specified parameters from folger deep and pinnacle
