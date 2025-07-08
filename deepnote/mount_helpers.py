@@ -18,6 +18,7 @@ token = os.getenv("ONC_TOKEN")
 # Create ONC client
 my_onc = onc.ONC(token)
 
+
 # schema: propertyCode: {label, deviceCategoryCode, color}
 sensor_info = {
     "oxygen": {
@@ -60,6 +61,17 @@ sensor_info = {
         "deviceCategoryCode": "CTD",
         "color": "darkcyan",
     },
+}
+
+sensor_colors = {
+    "Oxygen (ml/l)": "royalblue",
+    "PAR (µmol/m²/s)": "goldenrod",
+    "Chlorophyll (µg/l)": "darkgreen",
+    "Temperature (°C)": "crimson",
+    "Salinity (psu)": "orange",
+    "Turbidity (NTU)": "saddlebrown",
+    "Conductivity (S/m)": "mediumorchid",
+    "Density (kg/m3)": "darkcyan"
 }
 
 # schema: locationCode: {name, mountCode, castCode, mountDepth, depthThreshold}
@@ -286,7 +298,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
     plot_df = smooth_df(copy_df) if normalized else copy_df # if selected normalized then do so
 
     # Define figure and axes for subplots
-    fig, ax = plt.subplots(figsize=(16, 10))
+    fig, ax = plt.subplots(figsize=(16, 9))
 
     # Get sensor columns
     for col in plot_df.columns:
@@ -496,7 +508,6 @@ def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: flo
         if ymax and i == 2:  # Only apply ymax to the third (clipped) plot
             ax[i].set_ylim(top=ymax)
 
-
         # Y-axis ticks
         # ymin, ymax_actual = ax[i].get_ylim()
         # y_range = (ymax or ymax_actual) - ymin
@@ -602,18 +613,16 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
     axs[-1].set_xlabel("Timestamp", labelpad=15)
 
     # X-axis formatting
-
     # Compute dynamic padding (e.g. 3% of full time range)
     time_range = end_time - start_time
     padding = time_range * 0.03  # 3% padding on each side
-    ax.set_xlim(start_time - padding, end_time + padding) # Make sure all axes span same range
 
     locator = mdates.AutoDateLocator(minticks=6, maxticks=6)
     locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months
 
     for ax in axs:
+        ax.set_xlim(start_time - padding, end_time + padding) # Make sure all axes span same range
         ax.xaxis.set_major_locator(locator)
-        # ax.xaxis.set_major_formatter(formatter)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
     # Layout and title
@@ -670,11 +679,9 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
 
         locator = mdates.AutoDateLocator(minticks=6, maxticks=6)
         locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months
-
+        locator.prune = None  
         ax.xaxis.set_major_locator(locator)
-
-
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'),)
         
 
         if "oxygen" in col.lower():
@@ -696,4 +703,66 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
     plt.show()
 
 # TODO: make fucntion that will do twin y axis for parameters with greater magnitudes 
+
 # TODO: make function that will subplot specified parameters from folger deep and pinnacle
+
+def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame,sensor_cols: list[str], locationCode1: str, locationCode2: str) -> None:
+    """
+    Creates subplots comparing the same sensor parameters from two locations using shared styling
+    from the global sensor_info dictionary.
+
+    Dataframes must be from the same time period and have the same index (timestamps). TODO: add check for this
+
+    Parameters:
+        df1 (pd.DataFrame): First location's data (timestamp as index).
+        df2 (pd.DataFrame): Second location's data (timestamp as index).
+        sensor_cols (list[str]): List of shared propertyCodes to plot.
+        locationCode1 (str): Location code for first dataset (e.g., 'FGPPN').
+        locationCode2 (str): Location code for second dataset (e.g., 'FDPP').
+
+    Returns:
+        None
+    """
+    # Check time period in each dataframe (i.e. for missing data)
+    min_time = min(df1.index[0], df2.index[0])
+    max_time = max(df1.index[-1], df2.index[-1])
+
+    # Define figure and axes for subplots
+    fig, axes = plt.subplots(len(sensor_cols), 1, figsize=(14, 3.5 * len(sensor_cols)))
+
+    if len(sensor_cols) == 1:
+        axes = [axes]  # Ensure axes is always iterable
+
+    for ax, col in zip(axes, sensor_cols):
+
+        label = col #subplot title
+
+        # color opitons: seagreen & tomato, royalblue & crimson, teal & darkorange, Slateblue & firebrick. steelblue & indianred
+        ax.plot(df1.index, df1[col], label=f"{locationCode1}", linewidth=0.8, color="steelblue")
+        ax.plot(df2.index, df2[col], label=f"{locationCode2}", linewidth=0.8, color="indianred")
+
+        ax.set_title(f"{label}")
+        ax.set_ylabel(col, labelpad=12)
+        ax.set_xlabel("Time", labelpad=12)
+        ax.grid(True)
+        ax.legend()
+
+        # Compute dynamic padding (e.g. 3% of full time range)
+        time_range = max_time - min_time
+        padding = time_range * 0.03  # 3% padding on each side
+        ax.set_xlim(min_time - padding, max_time + padding) # Make sure all axes span same range
+
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'),)
+
+    start_time = df1.index[0]
+    end_time = df1.index[-1]
+
+    fig.suptitle(
+        f"{place[locationCode1]['name']} vs {place[locationCode2]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}", #\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}
+        fontweight='bold',
+        y=0.97,
+        x=0.51
+    )
+
+    plt.subplots_adjust(top=0.89, hspace=0.45)
+    plt.show()
