@@ -1,13 +1,15 @@
 import onc
 import pandas as pd
-
+import plotly 
+import plotly.express as px
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import MultipleLocator
-
+import plotly.express as px
+import cmocean
+import matplotlib.colors as mcolors
 from typing import List, Tuple
 from functools import reduce # used for dataframes
-
 import os
 
 # token = os.environ["GRACE_TOKEN"]
@@ -44,22 +46,22 @@ sensor_info = {
     "salinity": {
         "label": "Salinity (psu)",
         "deviceCategoryCode": "CTD",
-        "color": "orange",
+        "color": "#b1d12e",
     },
     "turbidityntu": {
         "label": "Turbidity (NTU)",
         "deviceCategoryCode": "FLNTU",
         "color": "saddlebrown",
     },
-    "conductivity": {
-        "label": "Conductivity (S/m)",
-        "deviceCategoryCode": "CTD",
-        "color": "mediumorchid",
-    },
     "density": {
         "label": "Density (kg/m3)",
         "deviceCategoryCode": "CTD",
         "color": "darkcyan",
+    },
+    "sigmat": {
+        "label": "Sigma-t",
+        "deviceCategoryCode": "CTD",
+        "color": mcolors.to_hex(cmocean.cm.thermal(0.75)),
     },
 }
 
@@ -68,10 +70,11 @@ sensor_colors = {
     "PAR (µmol/m²/s)": "goldenrod",
     "Chlorophyll (µg/l)": "darkgreen",
     "Temperature (°C)": "crimson",
-    "Salinity (psu)": "orange",
+    "Salinity (psu)": "#b1d12e",
     "Turbidity (NTU)": "saddlebrown",
     "Conductivity (S/m)": "mediumorchid",
-    "Density (kg/m3)": "darkcyan"
+    "Density (kg/m3)": "darkcyan",
+    "Sigma-t": mcolors.to_hex(cmocean.cm.thermal(0.75))
 }
 
 # schema: locationCode: {name, mountCode, castCode, mountDepth, depthThreshold}
@@ -251,35 +254,10 @@ def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
 
     return smoothed_df
 
-def round_data_tick_size(value):
-    """
-    Safely round a step size to a clean value: 1, 2, 5, or 10 x 10^n
-    """
-    import math
-    if value <= 0:
-        return 1  # fallback
-
-    for base in [1, 2, 5, 10]:
-        if value <= base:
-            return base
-
-    magnitude = 10 ** math.floor(math.log10(value))
-    residual = value / magnitude
-
-    if residual <= 1.5:
-        return 1 * magnitude
-    elif residual <= 3:
-        return 2 * magnitude
-    elif residual <= 7:
-        return 5 * magnitude
-    else:
-        return 10 * magnitude
-
-
 # PLOTTING FUNCTIONS
 
 # TODO: make consistent x axis labels for limits
-def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, normalized: bool = False) -> None:
+def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None, ymax: float = None, normalized: bool = False) -> None:
     """
     Plots each numeric sensor column in the DataFrame against time, 
     with line priority and unit-labeled legend entries.
@@ -302,28 +280,19 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
 
     # Get sensor columns
     for col in plot_df.columns:
-
-        # Dynamically match the label to a propertyCode
-        color = "black"  # default color
-        z_order = 1  # default base layer
-        for prop, meta in sensor_info.items():
-            if meta["label"] in col:
-                color = meta.get("color", "black")
-                if prop == "oxygen":
-                    z_order = 10  # ensure oxygen is on top
-                break
+        color = sensor_colors[col] or "black"  # default color
+        z_order = 10 if col == "Oxygen (ml/l)" else 1  # default base layer
         ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8, color=color, zorder=z_order)
 
     # Isolate times for title
-    start_time = plot_df.index[0]
-    end_time = plot_df.index[-1]
+    start_time = start or plot_df.index[0]
+    end_time = end or plot_df.index[-1]
 
     # ax.plot([start_time, start_time], [0, 100], color='purple', linestyle='--', linewidth=1) # NOTE: debug
-
     # print(f"start df: {start_time}, end: {end_time}") # NOTE: debug
 
     # Labels and title
-    ax.set_xlabel("Time", labelpad=12)
+    ax.set_xlabel("Date", labelpad=12)
     ax.set_ylabel("Sensor Value", labelpad=12)
     ax.set_title(f"{place[locationCode]['name']}{' (Denoised)' if normalized else ''}\n"
              f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
@@ -336,20 +305,18 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
     ax.set_xlim(start_time - x_padding, end_time + x_padding)
 
     locator = mdates.AutoDateLocator(minticks=4, maxticks=7)
-    locator.intervald[mdates.MONTHLY] = [1]  # set for every 2 months # TODO: make this dynamic depending on time range
-
+    locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months # TODO: make this dynamic depending on time range
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
     xticks = ax.get_xticks()
     xtick_dates = [mdates.num2date(tick) for tick in xticks]
-    print(xtick_dates)
+    # print(xtick_dates) # NOTE: debugging
     ax.set_xticks(xticks)
     ax.set_xticklabels([dt.strftime("%b %d, %Y") for dt in xtick_dates])
 
-
     # Y-axis formatting
-    y_min = plot_df.min().min()
+    y_min = 0 #plot_df.min().min()
     y_max = plot_df.max().max()
     y_padding = (y_max - y_min) * 0.01  # 1% vertical padding
     ax.set_ylim(bottom=y_min - y_padding, top=y_max + y_padding if ymax else None)
@@ -363,178 +330,6 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, ymax: float = None, norm
     ax.legend(loc="upper right")
         
     plt.tight_layout()
-    plt.show()
-
-# TODO: remove smoothing - make function to subplot raw plot then zoomed in plot?v
-def plot_dataframe_norm(df: pd.DataFrame, locationCode: str) -> None:
-    """
-    Plots each sensor column in the DataFrame twice: raw and smoothed (normalized),
-    in vertically stacked subplots.
-
-    Parameters:
-        df (pd.DataFrame): DataFrame indexed by time, with labeled sensor columns.
-        locationCode (str): ONC location code, used for plot titles.
-
-    Returns:
-        None
-    """
-    copy_df = df.copy()
-    smoothed_df = smooth_df(copy_df)
-
-    dfs = [copy_df, smoothed_df]
-    titles = ["", " - Smoothed"]
-
-    fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(16, 12))
-
-    for i, ax in enumerate(axes):
-        added_hypoxia_label = False
-        plot_df = dfs[i]
-
-        for col in plot_df.columns:
-
-            # Dynamically match the label to a propertyCode
-            color = "black"  # default color
-            z_order = 1  # default base layer
-
-            for prop, meta in sensor_info.items():
-                if meta["label"] in col:
-                    color = meta.get("color", "black")
-                    if prop == "oxygen":
-                        z_order = 10  # ensure oxygen is on top
-                    break
-            ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8, color=color, zorder=z_order)
-
-        # Plot hypoxia line on both, label only once
-        ax.axhline(
-            y=3,
-            color='red',
-            linestyle='--',
-            linewidth=1,
-            label='Low Oxygen Threshold (3 ml/l)' if not added_hypoxia_label else None
-        )
-        added_hypoxia_label = True  # Prevent further labels
-                    
-        # Time range for title and axis
-        start_time = plot_df.index[0]
-        end_time = plot_df.index[-1]
-
-        # Title and labels
-        ax.set_title(f"{place[locationCode]['name']}{titles[i]}")
-        ax.set_ylabel("Sensor Value", labelpad= 12)
-        ax.set_xlabel("Time", labelpad= 12)
-        ax.grid(True, linestyle="--", linewidth=0.5)
-        ax.legend(loc="upper right")
-
-        # Y-axis tick spacing
-        # ymin, ymax = ax.get_ylim()
-        # y_range = ymax - ymin
-        # ytick_step = round_data_tick_size(y_range / 10)
-        # ax.yaxis.set_major_locator(MultipleLocator(ytick_step))
-
-        # X-axis tick spacing (days)
-        x_range_days = (end_time - start_time).days
-        xtick_step = max(1, round_data_tick_size(x_range_days / 6))
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
-
-    # X-axis label on bottom plot only
-    axes[-1].set_xlabel("Date")
-
-    # Figure title
-    fig.suptitle(f"{place[locationCode]['name']}\n {start_time.strftime('%b %d, %Y')} to {end_time.strftime('%b %d, %Y')}",
-                 fontweight='bold', 
-                 x=0.51,
-                 y=0.98)
-
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.92, hspace=0.2)
-    plt.show()
-
-def plot_dataframe_norm_and_scale(df: pd.DataFrame, locationCode: str, ymax: float = None) -> None:
-    """
-    Plots raw, smoothed, and normalized+smoothed sensor values over time in 3 vertically stacked subplots.
-
-    Parameters:
-        df (pd.DataFrame): DataFrame indexed by datetime with sensor value columns.
-        ymax (float): Optional upper Y-axis limit.
-        title (str): Plot title.
-    """
-    copy_df = df.copy()
-    smoothed_df = smooth_df(copy_df)
-
-    dfs = [copy_df, smoothed_df, smoothed_df]
-    subtitles = ["", " - Smoothed", " - Smoothed (Zoomed In? )"]
-
-
-    fig, ax = plt.subplots(figsize=(16, 22), nrows=3, ncols=1)
-
-    sensor_cols = df.columns.tolist()
-
-    for i, df_i in enumerate(dfs):
-        added_hypoxia_label = False
-        for col in sensor_cols:
-
-        # Dynamically match the label to a propertyCode
-            color = "black"  # default color
-            z_order = 1  # default base layer
-
-            for prop, meta in sensor_info.items():
-                if meta["label"] in col:
-                    color = meta.get("color", "black")
-                    if prop == "oxygen":
-                        z_order = 10  # ensure oxygen is on top
-                    break
-            ax[i].plot(df_i.index, df_i[col], label=col, linewidth=1, color=color, zorder=z_order)
-
-        # Plot hypoxia line on both, label only once
-        ax[i].axhline(
-            y=3,
-            color='red',
-            linestyle='--',
-            linewidth=1,
-            label='Low Oxygen Threshold (3 ml/l)' if not added_hypoxia_label else None
-        )
-        added_hypoxia_label = True  # Prevent further labels
-            
-        # Time range
-        start_time = df_i.index[0]
-        end_time = df_i.index[-1]
-
-        # Labels and title
-        ax[i].set_title(f"{place[locationCode]['name']} {subtitles[i]}", y=1.0, pad=8)
-        ax[i].set_xlabel("Time", labelpad=13)
-        ax[i].set_ylabel("Sensor Value", labelpad=13)
-
-        # Axis limits
-        ax[i].margins(x=0.01, y=0.01)
-        ax[i].set_ylim(bottom=0)
-        if ymax and i == 2:  # Only apply ymax to the third (clipped) plot
-            ax[i].set_ylim(top=ymax)
-
-        # Y-axis ticks
-        # ymin, ymax_actual = ax[i].get_ylim()
-        # y_range = (ymax or ymax_actual) - ymin
-        # ytick_step = round_data_tick_size(y_range / 6)
-        # ax[i].yaxis.set_major_locator(MultipleLocator(ytick_step))
-
-        # X-axis ticks
-        x_range = (end_time - start_time).total_seconds() / (60 * 60 * 24)
-        xtick_step = max(1, round_data_tick_size(x_range / 6))
-        ax[i].xaxis.set_major_locator(mdates.DayLocator(interval=xtick_step))
-        ax[i].xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
-
-        # Grid and legend
-        ax[i].grid(True, linestyle="--", linewidth=0.5)
-        ax[i].legend(loc="upper right", title="Sensors")
-
-    # Add overall title
-    fig.suptitle(f"{place[locationCode]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-                 fontweight='bold', 
-                 x=0.51,
-                 y=0.98)
-
-    # Adjust layout
-    plt.subplots_adjust(top=0.94, hspace=0.2)
     plt.show()
 
 # TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
@@ -605,7 +400,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         # ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label="Low Oxygen Threshold (3 ml/l)")
 
         # Title per subplot
-        ax.set_title(f"{oxygen_label} vs {sensor_label}", y=1.0, pad=10)
+        ax.set_title(f"{oxygen_label} vs {sensor_label}", y=1.0, pad=10, fontsize=12)
         ax.grid(True, linestyle='--', linewidth=0.5)
 
     # Time range
@@ -613,7 +408,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
     end_time = df.index[-1]
 
     # Shared x-label
-    axs[-1].set_xlabel("Timestamp", labelpad=15)
+    axs[-1].set_xlabel("Date", labelpad=15)
 
     # X-axis formatting
     # Compute dynamic padding (e.g. 3% of full time range)
@@ -639,12 +434,12 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
     plt.show()
 
 # NOTE: this is set for x axis ticks every two months
-def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None) -> None:
+def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None) -> None:
     """
     Subplots all properties in a data frame against time.
     """
-    start_time = df.index[0]
-    end_time = df.index[-1]
+    start_time = start or df.index[0]
+    end_time = end or df.index[-1]
     sensor_cols = df.columns.to_list()
 
     fig, axes = plt.subplots(figsize=(16, len(sensor_cols)*4), nrows=len(sensor_cols), ncols=1)
@@ -653,26 +448,18 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
         axes = [axes]  # ensure iterable
 
     for i, col in enumerate(sensor_cols):
-        color = "black"
+        color = sensor_colors[col] or "black"
         z_order = 0.8
         label = col
 
-        for prop, meta in sensor_info.items():
-            if meta["label"] in col:
-                color = meta.get("color", "black")
-                label = meta["label"]
-                # if prop == "oxygen":
-                #     z_order = 10
-                break
-
         ax = axes[i]
-        ax.plot(df.index, df[col], color=color, zorder=z_order) #  label=label,
+        ax.plot(df.index, df[col], color=color, linewidth=0.8, zorder=z_order, label=label)
 
         ax.set_title(f"{place[locationCode]['name']} - {label}")
         ax.set_ylabel(label, labelpad=13)
         ax.set_xlabel("Date", labelpad=13)
         ax.grid(True, linestyle="--", alpha=0.6)
-        ax.legend()
+        ax.legend(loc="upper left")
 
         # Set consistent x-ticks across all subplots
 
@@ -686,7 +473,6 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
         locator.prune = None  
         ax.xaxis.set_major_locator(locator)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'),)
-        
 
         if "oxygen" in col.lower():
             #ax.axhline(y=3, color='red', linestyle='--', label="Hypoxia Threshold")
@@ -709,11 +495,7 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, title: str = None
     plt.subplots_adjust(top=0.93, hspace=0.4)
     plt.show()
 
-# TODO: make fucntion that will do twin y axis for parameters with greater magnitudes 
-
-# TODO: make function that will subplot specified parameters from folger deep and pinnacle
-
-def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame,sensor_cols: list[str], locationCode1: str, locationCode2: str) -> None:
+def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: list[str], locationCode1: str, locationCode2: str) -> None:
     """
     Creates subplots comparing the same sensor parameters from two locations using shared styling
     from the global sensor_info dictionary.
@@ -748,7 +530,7 @@ def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame,sensor_cols: li
         ax.plot(df1.index, df1[col], label=f"{locationCode1}", linewidth=0.8, color="slateblue")
         ax.plot(df2.index, df2[col], label=f"{locationCode2}", linewidth=0.8, color="firebrick")
 
-        ax.set_title(f"{label}")
+        ax.set_title(f"{label}", fontsize=12)
         ax.set_ylabel(col, labelpad=12)
         ax.set_xlabel("Time", labelpad=12)
         ax.grid(True)
@@ -772,4 +554,202 @@ def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame,sensor_cols: li
     )
 
     plt.subplots_adjust(top=0.89, hspace=0.45)
+    plt.show()
+
+def plot_dataframe_plotly(df: pd.DataFrame, locationCode: str) -> None:
+    """
+    Creates an interactive Plotly line chart for all numeric sensor columns in the DataFrame.
+
+    Parameters:
+        df (pd.DataFrame): DataFrame with datetime index and sensor columns.
+        locationCode (str): Optional identifier used in the title.
+
+    Returns:
+        None (displays interactive plot inline)
+    """
+    start_time = df.index[0]
+    end_time = df.index[-1]
+
+    # Reset index so timestamp becomes a column
+    df = df.copy().reset_index()
+
+    # Ensure the timestamp column is explicitly named
+    if "timestamp" not in df.columns:
+        df.rename(columns={df.columns[0]: "timestamp"}, inplace=True)
+
+    # Filter numeric columns
+    value_vars = [col for col in df.columns if col != "timestamp" and pd.api.types.is_numeric_dtype(df[col])]
+    if not value_vars:
+        raise ValueError("No numeric sensor columns found to plot.")
+
+    # Reshape to long format
+    melted = df.melt(id_vars="timestamp", value_vars=value_vars, var_name="Sensor", value_name="Value")
+
+    # Assign label = column name and color from global sensor_colors (default to black)
+    melted["Label"] = melted["Sensor"]
+    melted["Color"] = melted["Sensor"].apply(lambda col: sensor_colors.get(col, "black"))
+
+    # Create color mapping from Label to Color
+    color_discrete_map = dict(zip(melted["Label"], melted["Color"]))
+
+    # Plot
+    fig = px.line(
+        melted,
+        x="timestamp",
+        y="Value",
+        color="Label",
+        color_discrete_map=color_discrete_map,
+    )
+
+    # Set line width 
+    fig.update_traces(line=dict(width=1))
+
+    fig.update_layout(
+        xaxis_title="Date",
+        yaxis_title="Value",
+        legend_title="Sensor",
+        hovermode="x unified",
+        title ={
+            'text': f"{place[locationCode]['name']} {start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+            # 'x': 0.5,  # Center the title
+            'xanchor': 'center',
+            'yanchor': 'top'
+        }  
+    )
+
+    fig.show()
+
+
+def plot_min_max_normalized(df: pd.DataFrame, locationCode: str) -> None:
+    """
+    Plots all sensor parameters normalized to 0–1 on a single time-series plot.
+    Each line is colored and labeled using sensor_info.
+    """
+    start_time = df.index[0]
+    end_time = df.index[-1]
+    sensor_cols = df.columns.to_list()
+
+    # Normalize each column (0–1)
+    norm_df = df.copy()
+    for col in sensor_cols:
+        col_min = norm_df[col].min()
+        col_max = norm_df[col].max()
+        if col_max != col_min:
+            norm_df[col] = (norm_df[col] - col_min) / (col_max - col_min)
+        else:
+            norm_df[col] = 0.5  # fallback for constant column
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(16, 6))
+
+    # Plot each normalized series
+    for col in sensor_cols:
+        color = sensor_colors[col] or "black"
+        label = col
+        # for prop, meta in sensor_info.items():
+        #     if meta["label"] in col:
+        #         color = meta.get("color", "black")
+        #         label = meta["label"]
+        #         break
+
+        ax.plot(norm_df.index, norm_df[col], label=label, color=color, linewidth=1)
+
+    # Formatting
+    ax.set_title(
+         f"{place[locationCode]['name']} —  Min Max Normalized\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+        fontsize=14,
+        fontweight='bold'
+    )
+    ax.set_ylabel("Normalized Value (0–1)")
+    ax.set_xlabel("Date")
+    ax.grid(True, linestyle="--", alpha=0.6)
+
+    # Date formatting
+    locator = mdates.MonthLocator(interval=2)
+    formatter = mdates.DateFormatter('%b %d, %Y')
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+# TODO: set y padding
+def plot_with_twin_y_axis_for_outlier(df: pd.DataFrame, locationCode: str) -> None:
+    """
+    Plots time series data using a twin y-axis. The highest-magnitude parameter is plotted on the
+    right y-axis using its defined color and label; all others are on the left.
+
+    Parameters:
+        df (pd.DataFrame): Time-indexed DataFrame of numeric sensor columns.
+        locationCode (str): Optional label to include in title.
+        title (str): Optional custom title.
+        sensor_info (dict): Maps propertyCode -> {label, color}.
+
+    Returns:
+        None
+    """
+    # For title
+    start_time = df.index[0]
+    end_time = df.index[-1]
+
+    # Identify the highest-magnitude column
+    mean_mags = df.abs().mean()
+    high_param = mean_mags.idxmax()
+    low_params = [col for col in df.columns if col != high_param]
+
+    # Set up plot
+    fig, ax_left = plt.subplots(figsize=(16, 6))
+    ax_right = ax_left.twinx()
+
+    # Plot left y-axis (all but the high param)
+    for col in low_params:
+        color = sensor_colors[col] or "black"
+        label = col
+        z_order = 10 if col == "Oxygen (ml/l)" else 1  # default base layer
+
+        ax_left.plot(df.index, df[col], label=label, color=color, linewidth=0.8, zorder=z_order)
+
+    # Plot right y-axis (high-magnitude param)
+    color = sensor_colors[high_param] or "black"
+    label = high_param
+    
+    ax_right.plot(df.index, df[high_param], label=label, color=color, linewidth=0.8)
+    ax_right.tick_params(axis='y', colors=color)
+    ax_right.yaxis.label.set_color(color)
+
+    formatter = mdates.DateFormatter('%b %d, %Y')
+    ax_left.xaxis.set_major_formatter(formatter)
+
+    # Axis labels
+    ax_left.set_ylabel("Standard Scale Parameters")
+    ax_right.set_ylabel(label, labelpad=13)
+    ax_left.set_xlabel("Date", labelpad=13)
+
+    # Combine legends
+    lines_left, labels_left = ax_left.get_legend_handles_labels()
+    lines_right, labels_right = ax_right.get_legend_handles_labels()
+    ax_left.grid(True, linestyle="--", alpha=0.6)
+    ax_left.legend(lines_left + lines_right, labels_left + labels_right)
+
+    # Title
+    ax_left.set_title(f"{place[locationCode]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}", fontweight='bold')
+
+    fig.tight_layout()
+
+    # Match the y-axis heights proportionally
+    left_min, left_max = ax_left.get_ylim()
+    right_min, right_max = ax_right.get_ylim()
+
+    # Compute data ranges
+    left_range = left_max - left_min
+    right_range = right_max - right_min
+
+    if right_range < left_range:
+        diff = left_range - right_range
+        new_right_max = right_max + (diff/2)
+        new_right_min = right_min - (diff/2)
+
+    ax_right.set_ylim(new_right_min, new_right_max)
+
     plt.show()
