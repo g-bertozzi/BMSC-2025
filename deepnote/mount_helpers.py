@@ -256,8 +256,7 @@ def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
     return smoothed_df
 
 # PLOTTING FUNCTIONS
-
-# TODO: make consistent x axis labels for limits
+# TODO: update x axis formatting for all except plot_dataframe and subplot_all_with_time
 def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None, ymax: float = None, normalized: bool = False) -> None:
     """
     Plots each numeric sensor column in the DataFrame against time, 
@@ -283,22 +282,29 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
 
     # 4. Axis Formatting
 
-    ## 🔹 X-Axis (Time)
-    ax.set_xlim(start_time - x_padding, end_time + x_padding)  # Expand time range slightly on both ends
+    ## X-Axis (Date)
+    # Calculate number of full months in range
+    num_months = (end_time.year - start_time.year) * 12 + (end_time.month - start_time.month)
+    num_days = (end_time - start_time).days
 
-    # Auto-selects tick spacing and range
-    locator = mdates.AutoDateLocator(minticks=4, maxticks=7)
-    locator.intervald[mdates.MONTHLY] = [2]  # Force monthly ticks every 2 months
+    # Choose appropriate locator based on range
+    if num_days <= 31:
+        locator = mdates.WeekdayLocator(byweekday=mdates.MO)  # weekly
+    elif num_months <= 3:
+        locator = mdates.DayLocator(bymonthday=[1, 15])        # twice a month
+    elif num_months % 2 != 0 and num_months <= 10:
+        locator = mdates.MonthLocator(interval=1, bymonthday=1)
+    else:
+        locator = mdates.MonthLocator(interval=2, bymonthday=1)
 
-    # Apply locator and formatter to show clean date strings
+    formatter = mdates.DateFormatter('%b %d, %Y')
+    locator.prune = None  # don't cut off start or end ticks
+
+    # Apply x-axis formatting
+    ax.set_xlim(start_time - x_padding, end_time + x_padding)
     ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+    ax.xaxis.set_major_formatter(formatter)
 
-    # Convert ticks to readable labels and apply
-    xticks = ax.get_xticks()
-    xtick_labels = [mdates.num2date(tick).strftime("%b %d, %Y") for tick in xticks]
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(xtick_labels)  # Ensures final date format consistency
 
     ## 🔹 Y-Axis (Sensor Values)
     y_min = 0
@@ -466,22 +472,21 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timesta
         # 4. X-Axis Formatting
         # Calculate how many full months are in the range
         num_months = (end_time.year - start_time.year) * 12 + (end_time.month - start_time.month)
+        num_days = (end_time - start_time).days
 
-        # Choose tick spacing
-        if num_months <= 1:
-            locator = mdates.WeekdayLocator(byweekday=mdates.MO)
+        # Choose appropriate locator based on range
+        if num_days <= 31:
+            locator = mdates.WeekdayLocator(byweekday=mdates.MO)  # weekly
         elif num_months <= 3:
-            # Twice a month: 1st and 15th
-            locator = mdates.DayLocator(bymonthday=[1, 15])
-        elif num_months <= 5:
+            locator = mdates.DayLocator(bymonthday=[1, 15])        # twice a month
+        elif num_months % 2 != 0 and num_months <= 10:
             locator = mdates.MonthLocator(interval=1, bymonthday=1)
         else:
             locator = mdates.MonthLocator(interval=2, bymonthday=1)
-    b
-        locator.prune = None  
-        ax.set_xlim(start_time - padding, end_time + padding)
-        ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+
+        formatter = mdates.DateFormatter('%b %d, %Y')
+        locator.prune = None  # don't cut off start or end ticks
+
 
         # 5. Add Hypoxia Threshold (if oxygen)
         if "oxygen" in col.lower():
@@ -503,7 +508,6 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timesta
 
     plt.subplots_adjust(top=0.93, hspace=0.4)
     plt.show()
-
 
 def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: list[str], locationCode1: str, locationCode2: str) -> None:
     """
