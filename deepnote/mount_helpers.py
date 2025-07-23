@@ -5,6 +5,7 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import MaxNLocator
 import plotly.express as px
 import cmocean
 import matplotlib.colors as mcolors
@@ -262,75 +263,73 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     Plots each numeric sensor column in the DataFrame against time, 
     with line priority and unit-labeled legend entries.
     Option to normalize.
-
-    Parameters:
-        df (pd.DataFrame): DataFrame with 'timestamp' and sensor columns.
-        title (str): Title of the plot.
-        ymax (float): Optional maximum y-axis value. Default shows all values.
-
-    Returns:
-        None
     """
 
-    copy_df = df.copy()
-    plot_df = smooth_df(copy_df) if normalized else copy_df # if selected normalized then do so
-
-    # Define figure and axes for subplots
-    fig, ax = plt.subplots(figsize=(16, 9))
-
-    # Get sensor columns
-    for col in plot_df.columns:
-        color = sensor_colors[col] or "black"  # default color
-        z_order = 10 if col == "Oxygen (ml/l)" else 1  # default base layer
-        ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8, color=color, zorder=z_order)
-
-    # Isolate times for title
+    # 1. Data Preparation
+    plot_df = smooth_df(df.copy()) if normalized else df.copy()
     start_time = start or plot_df.index[0]
     end_time = end or plot_df.index[-1]
+    time_range = end_time - start_time
+    x_padding = time_range * 0.03  # 3% padding for visual breathing room
 
-    # ax.plot([start_time, start_time], [0, 100], color='purple', linestyle='--', linewidth=1) # NOTE: debug
-    # print(f"start df: {start_time}, end: {end_time}") # NOTE: debug
+    # 2. Plot Setup
+    fig, ax = plt.subplots(figsize=(16, 9))
 
-    # Labels and title
-    ax.set_xlabel("Date", labelpad=12)
-    ax.set_ylabel("Sensor Value", labelpad=12)
-    ax.set_title(f"{place[locationCode]['name']}{' (Denoised)' if normalized else ''}\n"
-             f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-            fontweight='bold',
-            pad=15)
+    # 3. Plot Sensor Lines
+    for col in plot_df.columns:
+        color = sensor_colors.get(col, "black")
+        z_order = 10 if col == "Oxygen (ml/l)" else 1
+        ax.plot(plot_df.index, plot_df[col], label=col, linewidth=0.8, color=color, zorder=z_order)
 
-    # X-axis formatting
-    time_range = end_time - start_time # Compute dynamic padding
-    x_padding = time_range * 0.03  # 3% padding on each side
-    ax.set_xlim(start_time - x_padding, end_time + x_padding)
+    # 4. Axis Formatting
 
+    ## 🔹 X-Axis (Time)
+    ax.set_xlim(start_time - x_padding, end_time + x_padding)  # Expand time range slightly on both ends
+
+    # Auto-selects tick spacing and range
     locator = mdates.AutoDateLocator(minticks=4, maxticks=7)
-    locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months # TODO: make this dynamic depending on time range
+    locator.intervald[mdates.MONTHLY] = [2]  # Force monthly ticks every 2 months
+
+    # Apply locator and formatter to show clean date strings
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
+    # Convert ticks to readable labels and apply
     xticks = ax.get_xticks()
-    xtick_dates = [mdates.num2date(tick) for tick in xticks]
-    # print(xtick_dates) # NOTE: debugging
+    xtick_labels = [mdates.num2date(tick).strftime("%b %d, %Y") for tick in xticks]
     ax.set_xticks(xticks)
-    ax.set_xticklabels([dt.strftime("%b %d, %Y") for dt in xtick_dates])
+    ax.set_xticklabels(xtick_labels)  # Ensures final date format consistency
 
-    # Y-axis formatting
-    y_min = 0 #plot_df.min().min()
-    y_max = plot_df.max().max()
-    y_padding = (y_max - y_min) * 0.01  # 1% vertical padding
-    ax.set_ylim(bottom=y_min - y_padding, top=y_max + y_padding if ymax else None)
+    ## 🔹 Y-Axis (Sensor Values)
+    y_min = 0
+    y_max_data = plot_df.max().max()
+    y_padding = (y_max_data - y_min) * 0.01  # Add 1% headroom
 
-    # Grid and legend
-    ax.grid(True, linestyle="--", linewidth=0.5)
+    # If user provides `ymax`, use it; otherwise, auto-scale
+    ax.set_ylim(
+        bottom=y_min - y_padding,
+        top=ymax + y_padding if ymax else y_max_data + y_padding
+    )
+
+    # 5. Labels and Title
+    ax.set_xlabel("Date", labelpad=12)
+    ax.set_ylabel("Sensor Value", labelpad=12)
+    ax.set_title(
+        f"{place[locationCode]['name']}{' (Denoised)' if normalized else ''}\n"
+        f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+        fontweight='bold',
+        pad=15
+    )
+
+    # 6. Annotations and Legend
+    ax.plot([start_time, end_time], [3, 3], color='red', linestyle='--', linewidth=1, label='Low Oxygen Threshold (3 ml/l)')
     ax.legend(title="Sensors", loc="upper right")
 
-    # Add line to show low ox level
-    ax.plot([start_time, end_time], [3, 3], color='red', linestyle='--', linewidth=1, label='Low Oxygen Threshold (3 ml/l)')
-    ax.legend(loc="upper right")
-        
+    # 7. Grid and Show
+    ax.grid(True, linestyle="--", linewidth=0.5)
     plt.tight_layout()
     plt.show()
+
 
 # TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
 # TODO: make y axis bottom padding
@@ -361,24 +360,22 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         ax = axs[i]
         ax2 = ax.twinx()
 
-        # Oxygen color and label
-        oxygen_meta = next((meta for meta in sensor_info.values() if meta["label"] in oxygen_col), {})
-        oxygen_color = "royalblue"
-        oxygen_label = oxygen_meta.get("label", "Oxygen")
+        # Oxygen label and color
+        oxygen_label = oxygen_col
+        oxygen_color = sensor_colors.get(oxygen_label, "royalblue")
 
-        # Sensor color and label
-        sensor_meta = next((meta for meta in sensor_info.values() if meta["label"] in sensor_col), {})
-        sensor_color = sensor_meta.get("color", "red")
-        sensor_label = sensor_meta.get("label", sensor_col)
+        # Sensor label and color
+        sensor_label = sensor_col
+        sensor_color = sensor_colors.get(sensor_label, "red")
 
         # Plot oxygen
-        ax.plot(plot_df.index, plot_df[oxygen_col], color=oxygen_color, label=oxygen_label, linewidth=0.8, zorder=10)
+        ax.plot(plot_df.index, plot_df[oxygen_col], color=oxygen_color, linewidth=0.8, zorder=10) #label=oxygen_label,
         ax.set_ylabel(oxygen_label, color=oxygen_color, labelpad=12)
         ax.tick_params(axis='y', labelcolor=oxygen_color)
         ax.set_ylim(bottom=0) # Ensure oxygen starts at 0
 
         # Plot sensor
-        ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, label=sensor_label, linewidth=0.8, zorder=1)
+        ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, linewidth=0.8, zorder=1) #label=sensor_label
         ax2.set_ylabel(sensor_label, color=sensor_color, labelpad=12)
         ax2.tick_params(axis='y', labelcolor=sensor_color)
 
@@ -388,16 +385,15 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         
 
         # TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
-        from matplotlib.ticker import MaxNLocator
+    
 
-        # Get number of ticks on the left (oxygen) y-axis
-        num_oxy_ticks = len(ax.get_yticks())
+        num_oxy_ticks = len(ax.get_yticks()) # Get number of ticks on the left (oxygen) y-axis
+        ax2.yaxis.set_major_locator(MaxNLocator(nbins=num_oxy_ticks, prune=None))  # Force right y-axis (sensor) to use same number of ticks
 
-        # Force right y-axis (sensor) to use same number of ticks
-        ax2.yaxis.set_major_locator(MaxNLocator(nbins=num_oxy_ticks, prune=None))
-
-        # TODO: if you want line then add legend
-        # ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label="Low Oxygen Threshold (3 ml/l)")
+        # Low ox line and legen
+        ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label="Low Oxygen Threshold (3 ml/l)")
+  
+        ax.legend(loc="best")
 
         # Title per subplot
         ax.set_title(f"{oxygen_label} vs {sensor_label}", y=1.0, pad=10, fontsize=12)
@@ -433,58 +429,71 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
     plt.subplots_adjust(top=0.89, hspace=0.4)
     plt.show()
 
-# NOTE: this is set for x axis ticks every two months
 def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None) -> None:
     """
     Subplots all properties in a data frame against time.
     """
+    
+    # 1. Data Preparation
     start_time = start or df.index[0]
     end_time = end or df.index[-1]
+    time_range = end_time - start_time
+    padding = time_range * 0.03  # 3% padding on each side
     sensor_cols = df.columns.to_list()
 
-    fig, axes = plt.subplots(figsize=(16, len(sensor_cols)*4), nrows=len(sensor_cols), ncols=1)
-
+    # 2. Plot Setup
+    fig, axes = plt.subplots(figsize=(16, len(sensor_cols) * 4), nrows=len(sensor_cols), ncols=1)
     if len(sensor_cols) == 1:
         axes = [axes]  # ensure iterable
 
+    # 3. Plot Each Sensor Column
     for i, col in enumerate(sensor_cols):
+        ax = axes[i]
         color = sensor_colors[col] or "black"
         z_order = 0.8
         label = col
 
-        ax = axes[i]
+        # Plot the sensor line
         ax.plot(df.index, df[col], color=color, linewidth=0.8, zorder=z_order, label=label)
 
+        # Labels and title
         ax.set_title(f"{place[locationCode]['name']} - {label}")
         ax.set_ylabel(label, labelpad=13)
         ax.set_xlabel("Date", labelpad=13)
         ax.grid(True, linestyle="--", alpha=0.6)
         ax.legend(loc="upper left")
 
-        # Set consistent x-ticks across all subplots
+        # 4. X-Axis Formatting
+        # Calculate how many full months are in the range
+        num_months = (end_time.year - start_time.year) * 12 + (end_time.month - start_time.month)
 
-        # Compute dynamic padding (e.g. 3% of full time range)
-        time_range = end_time - start_time
-        padding = time_range * 0.03  # 3% padding on each side
-        ax.set_xlim(start_time - padding, end_time + padding) # Make sure all axes span same range
-
-        locator = mdates.AutoDateLocator(minticks=6, maxticks=6)
-        locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months
+        # Choose tick spacing
+        if num_months <= 1:
+            locator = mdates.WeekdayLocator(byweekday=mdates.MO)
+        elif num_months <= 3:
+            # Twice a month: 1st and 15th
+            locator = mdates.DayLocator(bymonthday=[1, 15])
+        elif num_months <= 5:
+            locator = mdates.MonthLocator(interval=1, bymonthday=1)
+        else:
+            locator = mdates.MonthLocator(interval=2, bymonthday=1)
+    b
         locator.prune = None  
+        ax.set_xlim(start_time - padding, end_time + padding)
         ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'),)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
+        # 5. Add Hypoxia Threshold (if oxygen)
         if "oxygen" in col.lower():
-            #ax.axhline(y=3, color='red', linestyle='--', label="Hypoxia Threshold")
             ax.plot([start_time, end_time], [3, 3], color='red', linestyle='--', linewidth=1, label='Low Oxygen Threshold (3 ml/l)')
             ax.legend(loc="upper right")
-        
 
-    # match x-ticks across all subplots
+    # 6. Shared X-Ticks Across Subplots
     shared_xticks = axes[0].get_xticks()
     for ax in axes[1:]:
         ax.set_xticks(shared_xticks)
 
+    # 7. Title and Layout
     fig.suptitle(
         f"{place[locationCode]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
         fontweight='bold',
@@ -494,6 +503,7 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timesta
 
     plt.subplots_adjust(top=0.93, hspace=0.4)
     plt.show()
+
 
 def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: list[str], locationCode1: str, locationCode2: str) -> None:
     """
@@ -533,7 +543,7 @@ def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: l
         ax.set_title(f"{label}", fontsize=12)
         ax.set_ylabel(col, labelpad=12)
         ax.set_xlabel("Time", labelpad=12)
-        ax.grid(True)
+        ax.grid(True, linestyle="--", linewidth=0.5)
         ax.legend()
 
         # Compute dynamic padding (e.g. 3% of full time range)
@@ -602,7 +612,7 @@ def plot_dataframe_plotly(df: pd.DataFrame, locationCode: str) -> None:
     )
 
     # Set line width 
-    fig.update_traces(line=dict(width=1))
+    fig.update_traces(line=dict(width=0.7))
 
     fig.update_layout(
         xaxis_title="Date",
@@ -612,13 +622,12 @@ def plot_dataframe_plotly(df: pd.DataFrame, locationCode: str) -> None:
         title ={
             'text': f"{place[locationCode]['name']} {start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
             # 'x': 0.5,  # Center the title
-            'xanchor': 'center',
+            # 'xanchor': 'center',
             'yanchor': 'top'
         }  
     )
 
     fig.show()
-
 
 def plot_min_max_normalized(df: pd.DataFrame, locationCode: str) -> None:
     """
