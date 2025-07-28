@@ -12,14 +12,20 @@ from typing import List, Tuple
 from functools import reduce # used for dataframes
 import os
 
+# connect using Deepnote (secure)
 # token = os.environ["GRACE_TOKEN"]
-from dotenv import load_dotenv
-load_dotenv()
-token = os.getenv("ONC_TOKEN")
+
+# connect using env var (secure)
+# from dotenv import load_dotenv
+# load_dotenv()
+# token = os.getenv("ONC_TOKEN")
+
 
 # Create ONC client
-my_onc = onc.ONC(token)
+# my_onc = onc.ONC(token)
 
+# Global variable to hold the ONC client
+my_onc = None
 
 # schema: propertyCode: {label, deviceCategoryCode, color}
 sensor_info = {
@@ -83,20 +89,27 @@ place = {
         "name": "Folger Pinnacle",
         "mountCode": "FGPPN",
         "castCode":"CF341",
-        "mountDepth": 23,
+        "mountDepth": 25,
         # "depthThreshold": 20 # depth to be considered for deep section
     },
     "FGPD": {
         "name": "Folger Deep",
         "mountCode": "FGPD",
         "castCode": "CF340",
-        "mountDepth": 90,
+        "mountDepth": 100,
         # "depthThreshold": 85
     }
 }
 
 
 # API CALL FUNCTIONS
+
+def create_onc_client(token: str) -> None:
+    """
+    Initializes the global ONC client with a user-provided token.
+    """
+    global my_onc
+    my_onc = onc.ONC(token=token)
 
 # NOTE: consider changing column naming wiht units and all the functions reliant on column names with units
 def fetch_property_result(start: str, end: str, locationCode: str, propertyCode: str, updates: bool, resample: int = None) -> dict:
@@ -218,45 +231,9 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
 
     return merged_df
 
-
-# PROCESSING FUNCTIONS
-
-def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Applies rolling mean smoothing and rolling z-score outlier filtering 
-    to all data (i.e. numeric) columns in the DataFrame.
-
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with 'timestamp' and sensor data.
-
-    Returns:
-        pd.DataFrame: Smoothed and filtered DataFrame (same shape).
-    """
-    import numpy as np
-
-    window = 12  # Size of the rolling window for smoothing
-    z_thresh = 3.0  # Z-score threshold for outlier detection
-
-    smoothed_df = df.copy()  # Work on a copy to preserve the original
-    numeric_cols = df.columns
-
-    # Apply rolling smoothing and z-score filtering to each numeric column
-    for col in numeric_cols:
-        # Compute rolling mean and std deviation using centered window
-        roll_mean = smoothed_df[col].rolling(window=window, center=True).mean()
-        roll_std = smoothed_df[col].rolling(window=window, center=True).std()
-
-        # Calculate z-scores for detecting outliers
-        z_scores = (smoothed_df[col] - roll_mean) / roll_std
-
-        # Replace values with rolling mean where the z-score is within the threshold; otherwise set to NaN
-        smoothed_df[col] = roll_mean.where(z_scores.abs() < z_thresh, np.nan)
-
-    return smoothed_df
-
 # PLOTTING FUNCTIONS
 
-def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None, ymax: float = None, normalized: bool = False) -> None:
+def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None) -> None:
     """
     Plots each numeric sensor column in the DataFrame against time, 
     with line priority and unit-labeled legend entries.
@@ -264,7 +241,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     """
 
     # 1. Data Preparation
-    plot_df = smooth_df(df.copy()) if normalized else df.copy()
+    plot_df = df.copy()
     start_time = start or plot_df.index[0]
     end_time = end or plot_df.index[-1]
     time_range = end_time - start_time
@@ -304,7 +281,6 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(formatter)
 
-
     ## Y-Axis (Sensor Values)
     y_min = 0
     y_max_data = plot_df.max().max()
@@ -313,14 +289,14 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     # If user provides `ymax`, use it; otherwise, auto-scale
     ax.set_ylim(
         bottom=y_min - y_padding,
-        top=ymax + y_padding if ymax else y_max_data + y_padding
+        top=y_max_data + y_padding
     )
 
     # 5. Labels and Title
     ax.set_xlabel("Date", labelpad=12)
     ax.set_ylabel("Sensor Value", labelpad=12)
     ax.set_title(
-        f"{place[locationCode]['name']}{' (Denoised)' if normalized else ''}\n"
+        f"{place[locationCode]['name']}\n"
         f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
         fontweight='bold',
         pad=15
@@ -334,15 +310,15 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     ax.grid(True, linestyle="--", linewidth=0.5)
     plt.tight_layout()
     plt.show()
+
 # TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
 # TODO: make y axis bottom padding
-def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: bool = False) -> None:
+def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str) -> None:
     """
     Creates a series of subplots where each subplot shows oxygen vs another sensor over time.
     Applies consistent colors and a hypoxia threshold line.
     """
-    copy_df = df.copy()
-    plot_df = smooth_df(copy_df) if normalized else copy_df
+    plot_df = df.copy()
 
     # Identify oxygen column
     oxygen_col = [col for col in plot_df.columns if "oxygen" in col.lower()]
@@ -378,6 +354,10 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         ax.set_ylabel(oxygen_label, color=oxygen_color, labelpad=12)
         ax.tick_params(axis='y', labelcolor=oxygen_color)
         ax.set_ylim(bottom=0) # Ensure oxygen starts at 0
+
+        # Set dynamic y-limits: always show up to at least 3.5
+        oxy_max = plot_df[oxygen_col].max()
+        ax.set_ylim(top=max(oxy_max, 3.5))
 
         # Plot sensor
         ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, label=sensor_label, linewidth=0.8, zorder=1)
@@ -427,7 +407,7 @@ def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, normalized: boo
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
 
     # Layout and title
-    fig.suptitle(f"{place[locationCode]['name']}{' (Smoothed)' if normalized else ''}\n"
+    fig.suptitle(f"{place[locationCode]['name']}\n"
                  f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
                  fontweight='bold', 
                  y=0.98, 
@@ -544,8 +524,8 @@ def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: l
         label = col #subplot title
 
         # color options: seagreen & tomato, royalblue & crimson, teal & darkorange, Slateblue & firebrick. steelblue & indianred
-        ax.plot(df1.index, df1[col], label=f"{locationCode1}", linewidth=0.8, color="slateblue")
-        ax.plot(df2.index, df2[col], label=f"{locationCode2}", linewidth=0.8, color="firebrick")
+        ax.plot(df2.index, df2[col], label=f"{place[locationCode2]['name']} - {place[locationCode2]['mountDepth']}m", linewidth=0.8, color="firebrick")
+        ax.plot(df1.index, df1[col], label=f"{place[locationCode1]['name']} - {place[locationCode1]['mountDepth']}m", linewidth=0.8, color="slateblue")
 
         ax.set_title(f"{label}", fontsize=12)
         ax.set_ylabel(col, labelpad=12)
@@ -564,7 +544,7 @@ def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: l
     end_time = df1.index[-1]
 
     fig.suptitle(
-        f"{place[locationCode1]['name']} vs {place[locationCode2]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+        f"{place[locationCode2]['name']} vs {place[locationCode1]['name']}\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
         fontweight='bold',
         y=0.97,
         x=0.51
