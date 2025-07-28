@@ -12,10 +12,10 @@ from typing import List, Tuple
 from functools import reduce # used for dataframes
 import os
 
-token = os.environ["GRACE_TOKEN"]
-# from dotenv import load_dotenv
-# load_dotenv()
-# token = os.getenv("ONC_TOKEN")
+# token = os.environ["GRACE_TOKEN"]
+from dotenv import load_dotenv
+load_dotenv()
+token = os.getenv("ONC_TOKEN")
 
 # Create ONC client
 my_onc = onc.ONC(token)

@@ -257,6 +257,8 @@ def smooth_df(df: pd.DataFrame) -> pd.DataFrame:
 
 # PLOTTING FUNCTIONS
 # TODO: update x axis formatting for all except plot_dataframe and subplot_all_with_time
+
+# TODO: fix april through oct x axis
 def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None, ymax: float = None, normalized: bool = False) -> None:
     """
     Plots each numeric sensor column in the DataFrame against time, 
