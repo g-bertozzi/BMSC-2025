@@ -14,60 +14,61 @@ import os
 
 # connect using Deepnote (secure)
 # token = os.environ["GRACE_TOKEN"]
-
-# connect using env var (secure)
 # from dotenv import load_dotenv
 # load_dotenv()
 # token = os.getenv("ONC_TOKEN")
 
-
+# connect using env var (secure)
 # Create ONC client
 # my_onc = onc.ONC(token)
 
 # Global variable to hold the ONC client
 my_onc = None
 
-# schema: propertyCode: {label, deviceCategoryCode, color}
+# Global variable for hypoxia threshold
+hypoxia_threshold = 1.4
+
+# Schema: propertyCode: {label, deviceCategoryCode, #color}
 sensor_info = {
     "oxygen": {
         "label": "Oxygen (ml/l)",
         "deviceCategoryCode": "OXYSENSOR",
-        "color": "royalblue",
+        # "color": "royalblue",
     },
     "parphotonbased": {
         "label": "PAR (µmol/m²/s)",
         "deviceCategoryCode": "radiometer",
-        "color": "goldenrod",
+        # "color": "goldenrod",
     },
     "chlorophyll": {
         "label": "Chlorophyll (µg/l)",
         "deviceCategoryCode": "FLNTU",
-        "color": "darkgreen",
+        # "color": "darkgreen",
     },
     "seawatertemperature": {
         "label": "Temperature (°C)",
         "deviceCategoryCode": "CTD",
-        "color": "crimson",
+        # "color": "crimson",
     },
     "salinity": {
         "label": "Salinity (psu)",
         "deviceCategoryCode": "CTD",
-        "color": "#b1d12e",
+        # "color": "#b1d12e",
     },
     "turbidityntu": {
         "label": "Turbidity (NTU)",
         "deviceCategoryCode": "FLNTU",
-        "color": "saddlebrown",
+        # "color": "saddlebrown",
     },
     "density": {
         "label": "Density (kg/m3)",
         "deviceCategoryCode": "CTD",
-        "color": "darkcyan",
+        # "color": "darkcyan",
     },
     "sigmat": {
-        "label": "Sigma-t",
+        "label": "Sigma-t (kg/m3)",
         "deviceCategoryCode": "CTD",
-        "color": mcolors.to_hex(cmocean.cm.thermal(0.75)),
+        # "color": mcolors.to_hex(cmocean.cm.thermal(0.75)),
     },
 }
 
@@ -80,24 +81,22 @@ sensor_colors = {
     "Turbidity (NTU)": "saddlebrown",
     "Conductivity (S/m)": "mediumorchid",
     "Density (kg/m3)": "darkcyan",
-    "Sigma-t": mcolors.to_hex(cmocean.cm.thermal(0.75))
+    "Sigma-t (kg/m3)": mcolors.to_hex(cmocean.cm.thermal(0.75))
 }
 
-# schema: locationCode: {name, mountCode, castCode, mountDepth, depthThreshold}
+# Schema: locationCode: {name, mountCode, castCode, mountDepth}
 place = {
     "FGPPN": {
         "name": "Folger Pinnacle",
         "mountCode": "FGPPN",
         "castCode":"CF341",
         "mountDepth": 25,
-        # "depthThreshold": 20 # depth to be considered for deep section
     },
     "FGPD": {
         "name": "Folger Deep",
         "mountCode": "FGPD",
         "castCode": "CF340",
         "mountDepth": 100,
-        # "depthThreshold": 85
     }
 }
 
@@ -107,11 +106,16 @@ place = {
 def create_onc_client(token: str) -> None:
     """
     Initializes the global ONC client with a user-provided token.
+
+    Input: 
+        token (str): ONC API token
+
+    Output:
+        None
     """
     global my_onc
     my_onc = onc.ONC(token=token)
 
-# NOTE: consider changing column naming wiht units and all the functions reliant on column names with units
 def fetch_property_result(start: str, end: str, locationCode: str, propertyCode: str, updates: bool, resample: int = None) -> dict:
     """
     Makes ONC API call to get scalar data for a single propertyCode.
@@ -154,7 +158,8 @@ def fetch_property_result(start: str, end: str, locationCode: str, propertyCode:
         if locationCode == "FGPD":
             params["locationCode"] = "FGPD.O2"
 
-    if updates: print(f"API Request: getScalarData{params}") # NOTE: for clarity 
+    if updates: print(f"API Request: getScalardata{params}") # NOTE: for clarity 
+
 
     result = my_onc.getScalardata(params)
     return result
@@ -171,22 +176,25 @@ def result_to_dataframe(result: dict, propertyCode: str) -> pd.DataFrame:
     Output:
         pd.DataFrame: A DataFrame indexed by timestamp with a single column for the specified property.
                       Returns None if no data is found.
-
     """
-
+    # Error handle if no API response
     if not result or "sensorData" not in result or not result["sensorData"]:
         print(f"No data for {propertyCode}")
         return None
 
+    # Extract info from API response
     sensor = result["sensorData"][0]
     times = sensor["data"]["sampleTimes"]
     values = sensor["data"]["values"]
     column_title = sensor_info[propertyCode]["label"] if propertyCode in sensor_info else propertyCode
 
+    # Create new dataframe
     df = pd.DataFrame({
         "Time": pd.to_datetime(times),
         column_title: values
     })
+
+    # Set timestamps as the index of the dataframe
     df.set_index("Time", inplace=True)
     df.sort_index(inplace=True)
     return df
@@ -210,12 +218,12 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
     """
     dfs = []
 
+    # Make API request and dataframe for each property
     for prop in propertyCodes:
         try:
             result = fetch_property_result(start, end, locationCode, prop, updates, resample)
-
             df = result_to_dataframe(result, prop)
-            #if updates: print(f"Creating data frame for {prop}.\nPreview: {df.columns.tolist()}") # NOTE: for clarity
+            # if updates: print(f"Creating data frame for {prop}.\nPreview: {df.columns.tolist()}") # NOTE: for clarity
             if df is not None:
                 dfs.append(df)
         except Exception as e:
@@ -224,6 +232,7 @@ def get_multi_property_dataframe(start: str, end: str, locationCode: str, proper
     if not dfs:
         return None
 
+    # Merge property dataframes
     merged_df = reduce(lambda left, right: pd.merge(left, right, on="Time", how="outer"), dfs)
     merged_df.sort_index(inplace=True)
 
@@ -244,8 +253,6 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     plot_df = df.copy()
     start_time = start or plot_df.index[0]
     end_time = end or plot_df.index[-1]
-    time_range = end_time - start_time
-    x_padding = time_range * 0.03  # 3% padding for visual breathing room
 
     # 2. Plot Setup
     fig, ax = plt.subplots(figsize=(16, 9))
@@ -277,6 +284,8 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     locator.prune = None  # don't cut off start or end ticks
 
     # Apply x-axis formatting
+    time_range = end_time - start_time
+    x_padding = time_range * 0.03 
     ax.set_xlim(start_time - x_padding, end_time + x_padding)
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(formatter)
@@ -285,12 +294,7 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     y_min = 0
     y_max_data = plot_df.max().max()
     y_padding = (y_max_data - y_min) * 0.01  # Add 1% headroom
-
-    # If user provides `ymax`, use it; otherwise, auto-scale
-    ax.set_ylim(
-        bottom=y_min - y_padding,
-        top=y_max_data + y_padding
-    )
+    ax.set_ylim(bottom=y_min - y_padding, top=y_max_data + y_padding)
 
     # 5. Labels and Title
     ax.set_xlabel("Date", labelpad=12)
@@ -303,123 +307,121 @@ def plot_dataframe(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = No
     )
 
     # 6. Annotations and Legend
-    ax.plot([start_time, end_time], [3, 3], color='red', linestyle='--', linewidth=1, label='Low Oxygen Threshold (3 ml/l)')
-    ax.legend(title="Sensors", loc="upper right")
+    ax.plot([start_time, end_time], [hypoxia_threshold, hypoxia_threshold], color='red', linestyle='--', linewidth=1, label=f"Hypoxia Threshold ({hypoxia_threshold} ml/l)")
+    ax.legend(loc="upper right")
 
     # 7. Grid and Show
     ax.grid(True, linestyle="--", linewidth=0.5)
     plt.tight_layout()
     plt.show()
 
-# TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
-# TODO: make y axis bottom padding
-def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str) -> None:
+def subplot_all_with_oxygen(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None) -> None:
     """
-    Creates a series of subplots where each subplot shows oxygen vs another sensor over time.
-    Applies consistent colors and a hypoxia threshold line.
+    Creates subplots showing oxygen vs each other sensor over time.
+    Applies consistent styling, color, and a hypoxia threshold line.
     """
+
+    # 1. Data Preparation
     plot_df = df.copy()
+    oxygen_col = "Oxygen (ml/l)"
 
-    # Identify oxygen column
-    oxygen_col = [col for col in plot_df.columns if "oxygen" in col.lower()]
-    if not oxygen_col:
-        raise ValueError("No column containing 'oxygen' found.")
-    oxygen_col = oxygen_col[0]
+    if oxygen_col not in plot_df.columns:
+        raise ValueError(f"'{oxygen_col}' not found in DataFrame columns.")
 
-    # All other columns
+    start_time = start or plot_df.index[0]
+    end_time = end or plot_df.index[-1]
+    time_range = end_time - start_time
+    x_padding = time_range * 0.03
+
     sensor_cols = [col for col in plot_df.columns if col != oxygen_col]
     num_sensors = len(sensor_cols)
 
+    # 2. Plot Setup
     fig, axs = plt.subplots(num_sensors, 1, figsize=(16, 3.2 * num_sensors))
-
     if num_sensors == 1:
-        axs = [axs]  # ensure it's always iterable
+        axs = [axs]
 
+    # 3. Plot Each Subplot
     for i, sensor_col in enumerate(sensor_cols):
         ax = axs[i]
-        ax2 = ax.twinx()
+        ax_right = ax.twinx()
 
-        # Oxygen color and label
-        oxygen_meta = next((meta for meta in sensor_info.values() if meta["label"] in oxygen_col), {})
-        oxygen_color = "royalblue"
-        oxygen_label = oxygen_meta.get("label", "Oxygen")
+        # 3.1 Plot Oxygen
+        oxy_color = sensor_colors.get(oxygen_col, "royalblue")
+        sensor_color = sensor_colors.get(sensor_col, "black")
 
-        # Sensor color and label
-        sensor_meta = next((meta for meta in sensor_info.values() if meta["label"] in sensor_col), {})
-        sensor_color = sensor_meta.get("color", "red")
-        sensor_label = sensor_meta.get("label", sensor_col)
-
-        # Plot oxygen
-        ax.plot(plot_df.index, plot_df[oxygen_col], color=oxygen_color, label=oxygen_label, linewidth=0.8, zorder=10)
-        ax.set_ylabel(oxygen_label, color=oxygen_color, labelpad=12)
-        ax.tick_params(axis='y', labelcolor=oxygen_color)
-        ax.set_ylim(bottom=0) # Ensure oxygen starts at 0
-
-        # Set dynamic y-limits: always show up to at least 3.5
+        ax.plot(plot_df.index, plot_df[oxygen_col], color=oxy_color, linewidth=0.8, label=oxygen_col) # , zorder=10
+        ax.set_ylabel(oxygen_col, color=oxy_color, labelpad=12)
+        ax.tick_params(axis='y', labelcolor=oxy_color)
         oxy_max = plot_df[oxygen_col].max()
-        ax.set_ylim(top=max(oxy_max, 3.5))
+        ax.set_ylim(0, max(oxy_max * 1.03, hypoxia_threshold + 0.5))
 
-        # Plot sensor
-        ax2.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, label=sensor_label, linewidth=0.8, zorder=1)
-        ax2.set_ylabel(sensor_label, color=sensor_color, labelpad=12)
-        ax2.tick_params(axis='y', labelcolor=sensor_color)
+        ax.plot([start_time, end_time], [hypoxia_threshold, hypoxia_threshold], color='red', linestyle='--', linewidth=1, label=f"Hypoxia Threshold ({hypoxia_threshold} ml/l)")
 
-       # Align y=0 if other sensor values are low
+        # 3.2 Plot Other Sensor
+        ax_right.plot(plot_df.index, plot_df[sensor_col], color=sensor_color, linewidth=0.8, label=sensor_col) # , zorder=1
+        ax_right.set_ylabel(sensor_col, color=sensor_color, labelpad=12)
+        ax_right.tick_params(axis='y', labelcolor=sensor_color)
         if plot_df[sensor_col].min() <= 1:
-            ax2.set_ylim(bottom=0)
-        
+            ax_right.set_ylim(bottom=0)
 
-        # TODO: make y axis ticks consistent in terms of min and max labels, i.e. num ticks
+        # 3.3 Match Tick Counts
         from matplotlib.ticker import MaxNLocator
+        ax_right.yaxis.set_major_locator(MaxNLocator(nbins=len(ax.get_yticks()), prune=None))
 
-        # Get number of ticks on the left (oxygen) y-axis
-        num_oxy_ticks = len(ax.get_yticks())
+        # 3.4 Subplot Title
+        ax.set_title(f"{oxygen_col} vs {sensor_col}", y=1.0, pad=10, fontsize=12)
 
-        # Force right y-axis (sensor) to use same number of ticks
-        ax2.yaxis.set_major_locator(MaxNLocator(nbins=num_oxy_ticks, prune=None))
+        # 3.5 Combined Legend
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax_right.get_legend_handles_labels()
+        l = ax.legend(lines1 + lines2, labels1 + labels2, loc="lower right")
+        l.set_zorder(100)
 
-        # TODO: if you want line then add legend
-        ax.axhline(y=3, color='red', linestyle='--', linewidth=1, label="Low Oxygen Threshold (3 ml/l)")
-        ax.legend()
 
-        # Title per subplot
-        ax.set_title(f"{oxygen_label} vs {sensor_label}", y=1.0, pad=10, fontsize=12)
+        # 3.6 Grid
         ax.grid(True, linestyle='--', linewidth=0.5)
 
-    # Time range
-    start_time = df.index[0]
-    end_time = df.index[-1]
+    # 4. X-Axis Formatting
+    num_months = (end_time.year - start_time.year) * 12 + (end_time.month - start_time.month)
+    num_days = (end_time - start_time).days
 
-    # Shared x-label
-    axs[-1].set_xlabel("Date", labelpad=15)
+    if num_days <= 31:
+        locator = mdates.WeekdayLocator(byweekday=mdates.MO)
+    elif num_months <= 3:
+        locator = mdates.DayLocator(bymonthday=[1, 15])
+    elif num_months % 2 != 0 and num_months <= 10:
+        locator = mdates.MonthLocator(interval=1, bymonthday=1)
+    else:
+        locator = mdates.MonthLocator(interval=2, bymonthday=1)
 
-    # X-axis formatting
-    # Compute dynamic padding (e.g. 3% of full time range)
-    time_range = end_time - start_time
-    padding = time_range * 0.03  # 3% padding on each side
-
-    locator = mdates.AutoDateLocator(minticks=6, maxticks=6)
-    locator.intervald[mdates.MONTHLY] = [2]  # set for every 2 months
+    formatter = mdates.DateFormatter('%b %d, %Y')
+    locator.prune = None
 
     for ax in axs:
-        ax.set_xlim(start_time - padding, end_time + padding) # Make sure all axes span same range
+        ax.set_xlim(start_time - x_padding, end_time + x_padding)
         ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %Y'))
+        ax.xaxis.set_major_formatter(formatter)
 
-    # Layout and title
-    fig.suptitle(f"{place[locationCode]['name']}\n"
-                 f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-                 fontweight='bold', 
-                 y=0.98, 
-                 x=0.51)
+    axs[-1].set_xlabel("Date", labelpad=15)
 
+    # 5. Overall Title and Layout
+    fig.suptitle(
+        f"{place[locationCode]['name']}\n"
+        f"{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+        fontweight='bold',
+        y=0.98, x=0.51
+    )
     plt.subplots_adjust(top=0.89, hspace=0.4)
     plt.show()
-
 
 def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timestamp = None, end: pd.Timestamp = None) -> None:
     """
     Subplots all properties in a data frame against time.
+
+    Inputs:
+
+    Outputs:
     """
     
     # 1. Data Preparation
@@ -442,7 +444,7 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timesta
         label = col
 
         # Plot the sensor line
-        ax.plot(df.index, df[col], color=color, linewidth=0.8, zorder=z_order, label=label)
+        ax.plot(df.index, df[col], color=color, linewidth=0.7, zorder=z_order, label=label)
 
         # Labels and title
         ax.set_title(f"{place[locationCode]['name']} - {label}")
@@ -468,12 +470,15 @@ def subplot_all_with_time(df: pd.DataFrame, locationCode: str, start: pd.Timesta
 
         formatter = mdates.DateFormatter('%b %d, %Y')
         locator.prune = None  # don't cut off start or end ticks
+        
+        ax.xaxis.set_major_formatter(formatter)
 
 
         # 5. Add Hypoxia Threshold (if oxygen)
         if "oxygen" in col.lower():
-            ax.plot([start_time, end_time], [3, 3], color='red', linestyle='--', linewidth=1, label='Low Oxygen Threshold (3 ml/l)')
-            ax.legend(loc="upper right")
+            ax.plot([start_time, end_time], [hypoxia_threshold, hypoxia_threshold], color='red', linestyle='--', linewidth=1, label=f"Hypoxia Threshold ({hypoxia_threshold} ml/l)")
+            legend = ax.legend()
+            legend.set_zorder(50)
 
     # 6. Shared X-Ticks Across Subplots
     shared_xticks = axes[0].get_xticks()
@@ -498,14 +503,14 @@ def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: l
 
     Dataframes must be from the same time period and have the same index (timestamps). TODO: add check for this
 
-    Parameters:
+    Inputs:
         df1 (pd.DataFrame): First location's data (timestamp as index).
         df2 (pd.DataFrame): Second location's data (timestamp as index).
         sensor_cols (list[str]): List of shared propertyCodes to plot.
         locationCode1 (str): Location code for first dataset (e.g., 'FGPPN').
         locationCode2 (str): Location code for second dataset (e.g., 'FDPP').
 
-    Returns:
+    Outputs:
         None
     """
     # Check time period in each dataframe (i.e. for missing data)
@@ -553,136 +558,19 @@ def compare_sensor_subplots(df1: pd.DataFrame, df2: pd.DataFrame, sensor_cols: l
     plt.subplots_adjust(top=0.89, hspace=0.45)
     plt.show()
 
-def plot_dataframe_plotly(df: pd.DataFrame, locationCode: str) -> None:
-    """
-    Creates an interactive Plotly line chart for all numeric sensor columns in the DataFrame.
-
-    Parameters:
-        df (pd.DataFrame): DataFrame with datetime index and sensor columns.
-        locationCode (str): Optional identifier used in the title.
-
-    Returns:
-        None (displays interactive plot inline)
-    """
-    start_time = df.index[0]
-    end_time = df.index[-1]
-
-    # Reset index so timestamp becomes a column
-    df = df.copy().reset_index()
-
-    # Ensure the timestamp column is explicitly named
-    if "timestamp" not in df.columns:
-        df.rename(columns={df.columns[0]: "timestamp"}, inplace=True)
-
-    # Filter numeric columns
-    value_vars = [col for col in df.columns if col != "timestamp" and pd.api.types.is_numeric_dtype(df[col])]
-    if not value_vars:
-        raise ValueError("No numeric sensor columns found to plot.")
-
-    # Reshape to long format
-    melted = df.melt(id_vars="timestamp", value_vars=value_vars, var_name="Sensor", value_name="Value")
-
-    # Assign label = column name and color from global sensor_colors (default to black)
-    melted["Label"] = melted["Sensor"]
-    melted["Color"] = melted["Sensor"].apply(lambda col: sensor_colors.get(col, "black"))
-
-    # Create color mapping from Label to Color
-    color_discrete_map = dict(zip(melted["Label"], melted["Color"]))
-
-    # Plot
-    fig = px.line(
-        melted,
-        x="timestamp",
-        y="Value",
-        color="Label",
-        color_discrete_map=color_discrete_map,
-    )
-
-    # Set line width 
-    fig.update_traces(line=dict(width=1))
-
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Value",
-        legend_title="Sensor",
-        hovermode="x unified",
-        title ={
-            'text': f"{place[locationCode]['name']} {start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-            # 'x': 0.5,  # Center the title
-            # 'xanchor': 'center',
-            # 'yanchor': 'top'
-        }  
-    )
-
-    fig.show()
-
-def plot_min_max_normalized(df: pd.DataFrame, locationCode: str) -> None:
-    """
-    Plots all sensor parameters normalized to 0–1 on a single time-series plot.
-    Each line is colored and labeled using sensor_info.
-    """
-    start_time = df.index[0]
-    end_time = df.index[-1]
-    sensor_cols = df.columns.to_list()
-
-    # Normalize each column (0–1)
-    norm_df = df.copy()
-    for col in sensor_cols:
-        col_min = norm_df[col].min()
-        col_max = norm_df[col].max()
-        if col_max != col_min:
-            norm_df[col] = (norm_df[col] - col_min) / (col_max - col_min)
-        else:
-            norm_df[col] = 0.5  # fallback for constant column
-
-    # Create figure
-    fig, ax = plt.subplots(figsize=(16, 6))
-
-    # Plot each normalized series
-    for col in sensor_cols:
-        color = sensor_colors[col] or "black"
-        label = col
-        # for prop, meta in sensor_info.items():
-        #     if meta["label"] in col:
-        #         color = meta.get("color", "black")
-        #         label = meta["label"]
-        #         break
-
-        ax.plot(norm_df.index, norm_df[col], label=label, color=color, linewidth=1)
-
-    # Formatting
-    ax.set_title(
-         f"{place[locationCode]['name']} —  Min Max Normalized\n{start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
-        fontsize=14,
-        fontweight='bold'
-    )
-    ax.set_ylabel("Normalized Value (0–1)")
-    ax.set_xlabel("Date")
-    ax.grid(True, linestyle="--", alpha=0.6)
-
-    # Date formatting
-    locator = mdates.MonthLocator(interval=2)
-    formatter = mdates.DateFormatter('%b %d, %Y')
-    ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(formatter)
-
-    ax.legend()
-    plt.tight_layout()
-    plt.show()
-
 # TODO: set y padding
 def plot_with_twin_y_axis_for_outlier(df: pd.DataFrame, locationCode: str) -> None:
     """
     Plots time series data using a twin y-axis. The highest-magnitude parameter is plotted on the
     right y-axis using its defined color and label; all others are on the left.
 
-    Parameters:
+    Inputs:
         df (pd.DataFrame): Time-indexed DataFrame of numeric sensor columns.
         locationCode (str): Optional label to include in title.
         title (str): Optional custom title.
         sensor_info (dict): Maps propertyCode -> {label, color}.
 
-    Returns:
+    Outputs:
         None
     """
     # For title
@@ -749,3 +637,66 @@ def plot_with_twin_y_axis_for_outlier(df: pd.DataFrame, locationCode: str) -> No
     ax_right.set_ylim(new_right_min, new_right_max)
 
     plt.show()
+
+def plot_dataframe_plotly(df: pd.DataFrame, locationCode: str) -> None:
+    """
+    Creates an interactive Plotly line chart for all numeric sensor columns in the DataFrame.
+
+    Inputs:
+        df (pd.DataFrame): DataFrame with datetime index and sensor columns.
+        locationCode (str): Optional identifier used in the title.
+
+    Outputs:
+        None
+    """
+    start_time = df.index[0]
+    end_time = df.index[-1]
+
+    # Reset index so timestamp becomes a column
+    df = df.copy().reset_index()
+
+    # Ensure the timestamp column is explicitly named
+    if "timestamp" not in df.columns:
+        df.rename(columns={df.columns[0]: "timestamp"}, inplace=True)
+
+    # Filter numeric columns
+    value_vars = [col for col in df.columns if col != "timestamp" and pd.api.types.is_numeric_dtype(df[col])]
+    if not value_vars:
+        raise ValueError("No numeric sensor columns found to plot.")
+
+    # Reshape to long format
+    melted = df.melt(id_vars="timestamp", value_vars=value_vars, var_name="Sensor", value_name="Value")
+
+    # Assign label = column name and color from global sensor_colors (default to black)
+    melted["Label"] = melted["Sensor"]
+    melted["Color"] = melted["Sensor"].apply(lambda col: sensor_colors.get(col, "black"))
+
+    # Create color mapping from Label to Color
+    color_discrete_map = dict(zip(melted["Label"], melted["Color"]))
+
+    # Plot
+    fig = px.line(
+        melted,
+        x="timestamp",
+        y="Value",
+        color="Label",
+        color_discrete_map=color_discrete_map,
+    )
+
+    # Set line width 
+    fig.update_traces(line=dict(width=1))
+
+    fig.update_layout(
+        xaxis_title="Date",
+        yaxis_title="Value",
+        legend_title="Sensor",
+        hovermode="x unified",
+        title ={
+            'text': f"{place[locationCode]['name']} {start_time.strftime('%B %d, %Y')} to {end_time.strftime('%B %d, %Y')}",
+            # 'x': 0.5,  # Center the title
+            # 'xanchor': 'center',
+            # 'yanchor': 'top'
+        }  
+    )
+
+    fig.show()
